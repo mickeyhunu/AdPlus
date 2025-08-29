@@ -27,5 +27,5 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(frontBuild, "index.html"));
 });
 
-const PORT = Number(process.env.PORT || 4000);
+const PORT = Number(process.env.PORT || 80);
 app.listen(PORT, () => console.log(`Server listening on :${PORT}`));
