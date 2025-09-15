@@ -131,8 +131,23 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* 광고 선택 드롭다운 */}
+      <div className="mt-4">
+        <select
+          value={selectedAd}
+          onChange={(e) => setSelectedAd(e.target.value)}
+          className="rounded-lg border px-3 py-2 text-sm shadow-sm"
+        >
+          {toggleItems.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* 광고 토글바 */}
-      <div className="mt-4 overflow-x-auto">
+      {/* <div className="mt-4 overflow-x-auto">
         <div className="inline-flex gap-2 rounded-xl border bg-white p-1 shadow-sm">
           {toggleItems.map((item) => (
             <button
@@ -148,7 +163,7 @@ export default function Dashboard() {
             </button>
           ))}
         </div>
-      </div>
+      </div> */}
 
       {/* 차트 */}
       <div className="mt-6">
