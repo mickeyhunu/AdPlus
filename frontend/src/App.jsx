@@ -5,13 +5,12 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Layout from "./components/Layout";
 import Home from "./pages/Home";
+import Ads from "./pages/Ads";
+import Logs from "./pages/Logs";
+import Settings from "./pages/Settings";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { setToken, getMe } from "./api";
 import useIdleTimer from "./hooks/useIdleTimer";
-
-const Ads = () => <div className="p-6">광고 관리 페이지</div>;
-const Logs = () => <div className="p-6">로그 조회 페이지</div>;
-const Settings = () => <div className="p-6">설정 페이지</div>;
 
 export default function App() {
   const [token, setTok] = useState(localStorage.getItem("token"));
