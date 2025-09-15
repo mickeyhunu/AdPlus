@@ -1,6 +1,6 @@
 // src/pages/Dashboard.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchStats, fetchMyAds } from "../api";
+import { fetchStats, myAds } from "../api/ads";
 import VisitsChart from "../components/VisitsChart";
 
 // ★ 요청한 버킷만 남김
@@ -31,7 +31,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     let mounted = true;
-    fetchMyAds()
+    myAds()
       .then(({ data }) => {
         if (!mounted) return;
         const list = Array.isArray(data) ? data : data.ads || [];

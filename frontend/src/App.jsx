@@ -9,7 +9,8 @@ import Ads from "./pages/Ads";
 import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
 import ProtectedRoute from "./components/ProtectedRoute";
-import { setToken, getMe } from "./api";
+import { setToken } from "./api";
+import { getMe } from "./api/auth";
 import useIdleTimer from "./hooks/useIdleTimer";
 
 export default function App() {

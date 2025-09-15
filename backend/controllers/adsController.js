@@ -119,7 +119,7 @@ export async function listMyAds(req, res, next) {
     if (!userNo) return res.status(401).json({ message: "Unauthorized" });
 
     const [rows] = await pool.query(
-      `SELECT userAdNo, adName, adCode
+      `SELECT userAdNo, userAdNo AS adSeq, adName, adDomain, adCode
          FROM ADS
         WHERE userNo = ?
         ORDER BY createdAt DESC`,
@@ -223,5 +223,91 @@ export async function getAdsStats(req, res, next) {
     }));
 
     return res.json({ labels, series });
+  } catch (err) { next(err); }
+}
+
+/* ───────────────────────── 광고 상세 ───────────────────────── */
+export async function getAdDetail(req, res, next) {
+  try {
+    const userNo = req.user?.userNo ?? req.user?.id;
+    if (!userNo) return res.status(401).json({ message: "Unauthorized" });
+    const adSeq = String(req.params.adSeq || "");
+    const [[row]] = await pool.query(
+      `SELECT userAdNo AS adSeq, adName, adDomain, adCode
+         FROM ADS
+        WHERE userNo = ? AND userAdNo = ?
+        LIMIT 1`,
+      [userNo, adSeq]
+    );
+    if (!row) return res.status(404).json({ message: "Not found" });
+    return res.json(row);
+  } catch (err) { next(err); }
+}
+
+/* ───────────────────────── 광고 생성 ───────────────────────── */
+export async function createAd(req, res, next) {
+  try {
+    const userNo = req.user?.userNo ?? req.user?.id;
+    if (!userNo) return res.status(401).json({ message: "Unauthorized" });
+    const { adName = "", adDomain = "" } = req.body || {};
+    const [[{ nextSeq }]] = await pool.query(
+      `SELECT IFNULL(MAX(CAST(userAdNo AS UNSIGNED)),0) + 1 AS nextSeq
+         FROM ADS
+        WHERE userNo = ?`,
+      [userNo]
+    );
+    await pool.query(
+      `INSERT INTO ADS (userNo, userAdNo, adName, adDomain, createdAt)
+       VALUES (?, ?, ?, ?, NOW())`,
+      [userNo, nextSeq, adName, adDomain]
+    );
+    return res.status(201).json({ adSeq: nextSeq });
+  } catch (err) { next(err); }
+}
+
+/* ───────────────────────── 광고 수정 ───────────────────────── */
+export async function updateAd(req, res, next) {
+  try {
+    const userNo = req.user?.userNo ?? req.user?.id;
+    if (!userNo) return res.status(401).json({ message: "Unauthorized" });
+    const adSeq = String(req.params.adSeq || "");
+    const fields = {};
+    const { adName, adDomain, adCode } = req.body || {};
+    if (adName !== undefined) fields.adName = adName;
+    if (adDomain !== undefined) fields.adDomain = adDomain;
+    if (adCode !== undefined) fields.adCode = adCode;
+    if (Object.keys(fields).length === 0) return res.status(400).json({ message: "No fields" });
+    const setSql = Object.keys(fields).map(k => `${k}=?`).join(", ");
+    const params = [...Object.values(fields), userNo, adSeq];
+    const [result] = await pool.query(
+      `UPDATE ADS SET ${setSql} WHERE userNo = ? AND userAdNo = ?`,
+      params
+    );
+    return res.json({ updated: result.affectedRows });
+  } catch (err) { next(err); }
+}
+
+/* ───────────────────────── 광고 다중 삭제 ───────────────────────── */
+export async function bulkDeleteAds(req, res, next) {
+  try {
+    const userNo = req.user?.userNo ?? req.user?.id;
+    if (!userNo) return res.status(401).json({ message: "Unauthorized" });
+    const list = Array.isArray(req.body?.adSeqList) ? req.body.adSeqList : [];
+    if (list.length === 0) return res.json({ deleted: 0 });
+    const placeholders = list.map(() => "?").join(",");
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.query(`DELETE FROM AD_LOGS WHERE userAdNo IN (${placeholders})`, list);
+      await conn.query(`DELETE FROM AD_LOGS_SEQUENCES WHERE userAdNo IN (${placeholders})`, list);
+      await conn.query(`DELETE FROM ADS WHERE userNo = ? AND userAdNo IN (${placeholders})`, [userNo, ...list]);
+      await conn.commit();
+      return res.json({ deleted: list.length });
+    } catch (e) {
+      await conn.rollback();
+      return next(e);
+    } finally {
+      conn.release();
+    }
   } catch (err) { next(err); }
 }
