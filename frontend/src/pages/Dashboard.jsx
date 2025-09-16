@@ -65,28 +65,46 @@ export default function Dashboard() {
       : (stats.series || []).filter(s => String(s.userAdNo) === String(selectedAd));
 
     // 차트용 필드 표준화: name/color 포함
-    return source.map(s => ({
-      name: s.name || s.adName || s.userAdNo,
-      color: colorFor(s.userAdNo),
-      data: s.data || [],
-    }));
+    return source.map((s) => {
+      const colorKey = s.userAdNo
+        ?? (s.adSeq !== undefined && s.adSeq !== null ? `SEQ_${s.adSeq}` : s.adCode ?? s.id ?? "");
+      const nameLabel = s.name
+        || s.adName
+        || (s.adSeq !== undefined && s.adSeq !== null ? String(s.adSeq) : s.userAdNo);
+      return {
+        name: nameLabel,
+        color: colorFor(colorKey),
+        data: s.data || [],
+      };
+    });
   }, [stats, selectedAd]);
 
   // 토글 항목
   const toggleItems = useMemo(() => {
     const items = [{ value: "ALL", label: "전체(비교)" }];
     if (ads.length > 0) {
-      items.push(...ads.map(a => ({
-        value: a.userAdNo,
-        label: a.adName || a.userAdNo,
-      })));
+      items.push(...ads.map((a) => {
+        const seqLabel = a?.adSeq !== undefined && a?.adSeq !== null
+          ? String(a.adSeq)
+          : (a?.userAdNo ?? "");
+        const nameLabel = typeof a?.adName === "string" ? a.adName.trim() : "";
+        const suffix = seqLabel || a.userAdNo || "";
+        const label = nameLabel
+          ? (suffix ? `${nameLabel} (${suffix})` : nameLabel)
+          : suffix;
+        return {
+          value: a.userAdNo,
+          label,
+        };
+      }));
     } else if (Array.isArray(stats.series)) {
       const seen = new Set();
       for (const s of stats.series) {
         const v = s.userAdNo || s.adNo || s.id;
         if (!v || seen.has(v)) continue;
         seen.add(v);
-        items.push({ value: String(v), label: s.name || s.adName || String(v) });
+        const seqLabel = s?.adSeq !== undefined && s?.adSeq !== null ? String(s.adSeq) : String(v);
+        items.push({ value: String(v), label: s.name || s.adName || seqLabel });
       }
     }
     return items;

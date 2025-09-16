@@ -39,14 +39,27 @@ function formatTickLabel(label) {
 export default function VisitsChart({ labels = [], series = [] }) {
   const datasets = useMemo(() => {
     return (series || []).map((s, i) => {
-      const label =
-        s.name ?? s.adName ?? s.userAdNo ?? s.adId ?? s.id ?? `AD ${i + 1}`;
-
+      const label =         
+        s.name
+        ?? s.adName
+        ?? (s.adSeq !== undefined && s.adSeq !== null ? String(s.adSeq) : undefined)
+        ?? s.userAdNo
+        ?? s.adId
+        ?? s.id
+        ?? `AD ${i + 1}`;
+      
       // ✅ 항상 팔레트에서 색을 가져옴(백엔드 s.color 무시)
       const pal = PALETTE[i % PALETTE.length];
 
       return {
-        id: String(s.userAdNo ?? s.adCode ?? s.adId ?? s.id ?? i), // dataset 식별 고정
+        id: String(
+          s.userAdNo
+          ?? (s.adSeq !== undefined && s.adSeq !== null ? String(s.adSeq) : undefined)
+          ?? s.adCode
+          ?? s.adId
+          ?? s.id
+          ?? i
+        ), // dataset 식별 고정
         label,
         data: Array.isArray(s.data) ? s.data : [],
         borderColor: pal.border,

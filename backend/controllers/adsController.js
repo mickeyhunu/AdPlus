@@ -119,7 +119,7 @@ export async function listMyAds(req, res, next) {
     if (!userNo) return res.status(401).json({ message: "Unauthorized" });
 
     const [rows] = await pool.query(
-      `SELECT userAdNo, userAdNo AS adSeq, adName, adDomain, adCode
+      `SELECT adSeq, userAdNo, adName, adDomain, adCode
          FROM ADS
         WHERE userNo = ?
         ORDER BY createdAt DESC`,
@@ -141,7 +141,7 @@ export async function getAdsStats(req, res, next) {
 
     // 내가 볼 수 있는 광고
     const [ads] = await pool.query(
-      `SELECT userAdNo, adName FROM ADS WHERE userNo = ?`,
+      `SELECT adSeq, userAdNo, adName FROM ADS WHERE userNo = ?`,
       [userNo]
     );
     if (!ads.length) return res.json({ labels: [], series: [] });
@@ -216,11 +216,17 @@ export async function getAdsStats(req, res, next) {
       for (const k of seriesMap.keys()) seriesMap.get(k).unshift(0);
     }
 
-    const series = Array.from(seriesMap.entries()).map(([userAdNo, data]) => ({
-      userAdNo,
-      name: ads.find(a => a.userAdNo === userAdNo)?.adName || userAdNo, // 차트 라벨용
-      data,
-    }));
+    const series = Array.from(seriesMap.entries()).map(([userAdNo, data]) => {
+      const meta = ads.find(a => a.userAdNo === userAdNo);
+      const displayName = meta?.adName
+        || (meta?.adSeq !== undefined && meta?.adSeq !== null ? String(meta.adSeq) : userAdNo);
+      return {
+        userAdNo,
+        adSeq: meta?.adSeq ?? null,
+        name: displayName, // 차트 라벨용
+        data,
+      };
+    });
 
     return res.json({ labels, series });
   } catch (err) { next(err); }
@@ -231,13 +237,16 @@ export async function getAdDetail(req, res, next) {
   try {
     const userNo = req.user?.userNo ?? req.user?.id;
     if (!userNo) return res.status(401).json({ message: "Unauthorized" });
-    const adSeq = String(req.params.adSeq || "");
+    const rawAdSeq = String(req.params.adSeq || "").trim();
+    if (!rawAdSeq) return res.status(400).json({ message: "Invalid adSeq" });
+    const bySeq = /^\d+$/.test(rawAdSeq);
+    const params = bySeq ? [userNo, Number(rawAdSeq)] : [userNo, rawAdSeq];
     const [[row]] = await pool.query(
-      `SELECT userAdNo AS adSeq, adName, adDomain, adCode
+      `SELECT adSeq, userAdNo, adName, adDomain, adCode
          FROM ADS
-        WHERE userNo = ? AND userAdNo = ?
+        WHERE userNo = ? ${bySeq ? "adSeq = ?" : "userAdNo = ?"}
         LIMIT 1`,
-      [userNo, adSeq]
+      params
     );
     if (!row) return res.status(404).json({ message: "Not found" });
     return res.json(row);
@@ -250,18 +259,40 @@ export async function createAd(req, res, next) {
     const userNo = req.user?.userNo ?? req.user?.id;
     if (!userNo) return res.status(401).json({ message: "Unauthorized" });
     const { adName = "", adDomain = "" } = req.body || {};
-    const [[{ nextSeq }]] = await pool.query(
-      `SELECT IFNULL(MAX(CAST(userAdNo AS UNSIGNED)),0) + 1 AS nextSeq
-         FROM ADS
-        WHERE userNo = ?`,
-      [userNo]
-    );
-    await pool.query(
-      `INSERT INTO ADS (userNo, userAdNo, adName, adDomain, createdAt)
-       VALUES (?, ?, ?, ?, NOW())`,
-      [userNo, nextSeq, adName, adDomain]
-    );
-    return res.status(201).json({ adSeq: nextSeq });
+        const nameValue = String(adName ?? "").trim();
+    const domainValue = String(adDomain ?? "").trim();
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const placeholder = `${userNo}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const [result] = await conn.query(
+        `INSERT INTO ADS (userNo, userAdNo, adName, adDomain, createdAt)
+         VALUES (?, ?, ?, ?, NOW())`,
+        [userNo, placeholder, nameValue, domainValue]
+      );
+      const adSeq = Number(result.insertId);
+      const userAdNo = `${userNo}_${adSeq}`;
+      await conn.query(
+        `UPDATE ADS SET userAdNo = ? WHERE adSeq = ? AND userNo = ?`,
+        [userAdNo, adSeq, userNo]
+      );
+      const [[created]] = await conn.query(
+        `SELECT adSeq, userAdNo, adName, adDomain, adCode
+           FROM ADS
+          WHERE userNo = ? AND adSeq = ?
+          LIMIT 1`,
+        [userNo, adSeq]
+      );
+      await conn.commit();
+      if (created) return res.status(201).json(created);
+      return res.status(201).json({ adSeq, userAdNo, adName: nameValue, adDomain: domainValue, adCode: null });
+    } catch (e) {
+      await conn.rollback();
+      return next(e);
+    } finally {
+      conn.release();
+    }
   } catch (err) { next(err); }
 }
 
@@ -270,7 +301,9 @@ export async function updateAd(req, res, next) {
   try {
     const userNo = req.user?.userNo ?? req.user?.id;
     if (!userNo) return res.status(401).json({ message: "Unauthorized" });
-    const adSeq = String(req.params.adSeq || "");
+    const rawAdSeq = String(req.params.adSeq || "").trim();
+    if (!rawAdSeq) return res.status(400).json({ message: "Invalid adSeq" });
+    const bySeq = /^\d+$/.test(rawAdSeq);
     const fields = {};
     const { adName, adDomain, adCode } = req.body || {};
     if (adName !== undefined) fields.adName = adName;
@@ -278,9 +311,9 @@ export async function updateAd(req, res, next) {
     if (adCode !== undefined) fields.adCode = adCode;
     if (Object.keys(fields).length === 0) return res.status(400).json({ message: "No fields" });
     const setSql = Object.keys(fields).map(k => `${k}=?`).join(", ");
-    const params = [...Object.values(fields), userNo, adSeq];
+    const params = [...Object.values(fields), userNo, bySeq ? Number(rawAdSeq) : rawAdSeq]
     const [result] = await pool.query(
-      `UPDATE ADS SET ${setSql} WHERE userNo = ? AND userAdNo = ?`,
+      `UPDATE ADS SET ${setSql} WHERE userNo = ? AND ${bySeq ? "adSeq = ?" : "userAdNo = ?"}`,
       params
     );
     return res.json({ updated: result.affectedRows });
@@ -294,15 +327,64 @@ export async function bulkDeleteAds(req, res, next) {
     if (!userNo) return res.status(401).json({ message: "Unauthorized" });
     const list = Array.isArray(req.body?.adSeqList) ? req.body.adSeqList : [];
     if (list.length === 0) return res.json({ deleted: 0 });
-    const placeholders = list.map(() => "?").join(",");
+    
+    const seqIds = [];
+    const rawUserAdNos = new Set();
+    for (const item of list) {
+      const value = String(item ?? "").trim();
+      if (!value) continue;
+      if (/^\d+$/.test(value)) seqIds.push(Number(value));
+      else rawUserAdNos.add(value);
+    }
+
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-      await conn.query(`DELETE FROM AD_LOGS WHERE userAdNo IN (${placeholders})`, list);
-      await conn.query(`DELETE FROM AD_LOGS_SEQUENCES WHERE userAdNo IN (${placeholders})`, list);
-      await conn.query(`DELETE FROM ADS WHERE userNo = ? AND userAdNo IN (${placeholders})`, [userNo, ...list]);
+
+      const confirmed = new Set();
+      if (seqIds.length > 0) {
+        const seqPlaceholders = seqIds.map(() => "?").join(",");
+        const [rows] = await conn.query(
+          `SELECT userAdNo
+             FROM ADS
+            WHERE userNo = ? AND adSeq IN (${seqPlaceholders})`,
+          [userNo, ...seqIds]
+        );
+        for (const row of rows) {
+          if (row?.userAdNo) confirmed.add(row.userAdNo);
+        }
+      }
+
+      if (rawUserAdNos.size > 0) {
+        const listUserAdNos = Array.from(rawUserAdNos);
+        const placeholdersUser = listUserAdNos.map(() => "?").join(",");
+        const [rows] = await conn.query(
+          `SELECT userAdNo
+             FROM ADS
+            WHERE userNo = ? AND userAdNo IN (${placeholdersUser})`,
+          [userNo, ...listUserAdNos]
+        );
+        for (const row of rows) {
+          if (row?.userAdNo) confirmed.add(row.userAdNo);
+        }
+      }
+
+      const finalUserAdNos = Array.from(confirmed).filter(Boolean);
+      if (finalUserAdNos.length === 0) {
+        await conn.commit();
+        return res.json({ deleted: 0 });
+      }
+
+      const placeholders = finalUserAdNos.map(() => "?").join(",");
+      await conn.query(`DELETE FROM AD_LOGS WHERE userAdNo IN (${placeholders})`, finalUserAdNos);
+      await conn.query(`DELETE FROM AD_LOGS_SEQUENCES WHERE userAdNo IN (${placeholders})`, finalUserAdNos);
+      const [result] = await conn.query(
+        `DELETE FROM ADS WHERE userNo = ? AND userAdNo IN (${placeholders})`,
+        [userNo, ...finalUserAdNos]
+      );
+
       await conn.commit();
-      return res.json({ deleted: list.length });
+      return res.json({ deleted: result.affectedRows });
     } catch (e) {
       await conn.rollback();
       return next(e);
