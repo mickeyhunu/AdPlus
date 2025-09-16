@@ -19,13 +19,26 @@ export default function App() {
 
   useEffect(() => {
     setToken(token);
-    if (!token) { setUser(null); return; }
-    getMe().then(({ data }) => setUser(data)).catch(() => setUser(null));
+    if (!token) {
+      setUser(null);
+      localStorage.removeItem("user");
+      return;
+    }
+    getMe()
+      .then(({ data }) => {
+        setUser(data);
+        localStorage.setItem("user", JSON.stringify(data));
+      })
+      .catch(() => {
+        setUser(null);
+        localStorage.removeItem("user");
+    });
   }, [token]);
 
   // 만료 시 처리 콜백을 안정화
   const handleTimeout = useCallback(() => {
     localStorage.removeItem("token");
+    localStorage.removeItem("user");
     setTok(null);
     setUser(null);
   }, []);
@@ -40,6 +53,7 @@ export default function App() {
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem("token");
+    localStorage.removeItem("user");
     setTok(null);
     setUser(null);
   }, []);
