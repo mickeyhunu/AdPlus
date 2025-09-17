@@ -4,7 +4,8 @@
   "scripts": {
     "dev": "concurrently -n FRONT,BACK -c blue,green \"npm --prefix frontend run dev\" \"npm --prefix backend run dev\"",
     "build": "npm --prefix frontend run build",
-    "start": "npm --prefix backend run start"
+    "start": "npm --prefix backend run start",
+    "postinstall": "concurrently \"npm --prefix frontend install\" \"npm --prefix backend install\""
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.7.0",
