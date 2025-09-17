@@ -259,24 +259,26 @@ export async function createAd(req, res, next) {
     const userNo = req.user?.userNo ?? req.user?.id;
     if (!userNo) return res.status(401).json({ message: "Unauthorized" });
     const { adName = "", adDomain = "" } = req.body || {};
-        const nameValue = String(adName ?? "").trim();
+    
+    const nameValue = String(adName ?? "").trim();
     const domainValue = String(adDomain ?? "").trim();
 
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-      const placeholder = `${userNo}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const [[seqRow]] = await conn.query(
+        `SELECT IFNULL(MAX(userAdSeq), 0) + 1 AS nextSeq FROM ADS WHERE userNo = ?`,
+        [userNo]
+      );
+      const userAdSeq = Math.max(1, Number(seqRow?.nextSeq ?? 1));
+      const userAdNo = `${userNo}_${userAdSeq}`;
       const [result] = await conn.query(
-        `INSERT INTO ADS (userNo, userAdNo, adName, adDomain, createdAt)
-         VALUES (?, ?, ?, ?, NOW())`,
-        [userNo, placeholder, nameValue, domainValue]
+        `INSERT INTO ADS (userNo, userAdNo, userAdSeq, adName, adDomain, createdAt)
+         VALUES (?, ?, ?, ?, ?, NOW())`,
+        [userNo, userAdNo, userAdSeq, nameValue, domainValue]
       );
       const adSeq = Number(result.insertId);
-      const userAdNo = `${userNo}_${adSeq}`;
-      await conn.query(
-        `UPDATE ADS SET userAdNo = ? WHERE adSeq = ? AND userNo = ?`,
-        [userAdNo, adSeq, userNo]
-      );
+
       const [[created]] = await conn.query(
         `SELECT adSeq, userAdNo, adName, adDomain, adCode
            FROM ADS
@@ -289,6 +291,9 @@ export async function createAd(req, res, next) {
       return res.status(201).json({ adSeq, userAdNo, adName: nameValue, adDomain: domainValue, adCode: null });
     } catch (e) {
       await conn.rollback();
+      if (e?.code === "ER_DUP_ENTRY") {
+        return res.status(409).json({ message: "Duplicate ad detected. Please try again." });
+      }
       return next(e);
     } finally {
       conn.release();
