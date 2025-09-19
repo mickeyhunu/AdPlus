@@ -233,17 +233,6 @@ export default function Ads() {
     
     setCreating(false);
     setNewForm({ adName: '', adDomain: '기타' });
-    // 생성한 항목을 선택 상태로 열어두기
-    const sourceRows = Array.isArray(refreshed) ? refreshed : rows;
-    const just = sourceRows.find(r => r.adSeq === createdKey) || {
-      adSeq: createdKey,
-      adSeqDisplay: createdDisplay,
-      adSeqNumber: createdInfo.numeric,
-      adSeqLabel: (createdDisplay === undefined || createdDisplay === null || createdDisplay === '') ? '-' : createdDisplay,
-      adName: newForm.adName,
-      adDomain: newForm.adDomain,
-      adCode: code,
-    };
   };
 
   // 다중 삭제

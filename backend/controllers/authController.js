@@ -1,5 +1,4 @@
 // backend/src/controllers/authController.js
-import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { pool } from "../config/db.js";
 
@@ -27,11 +26,6 @@ export async function login(req, res, next) {
     if (user.password !== password) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
-
-    // const ok = await bcrypt.compare(password, user.password); // 해시 비교 복구
-    // if (!ok) {
-    //   return res.status(401).json({ message: "Invalid credentials" });
-    // }
 
     const token = jwt.sign(
       { 

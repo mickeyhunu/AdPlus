@@ -1,19 +1,6 @@
 // backend/src/controllers/adsController.js
 import { pool } from "../config/db.js";
 
-async function tableHasColumn(conn, tableName, columnName) {
-  const [[row]] = await conn.query(
-    `SELECT 1 AS found
-       FROM information_schema.columns
-      WHERE table_schema = DATABASE()
-        AND table_name = ?
-        AND column_name = ?
-      LIMIT 1`,
-    [tableName, columnName]
-  );
-  return Boolean(row?.found);
-}
-
 /* ───────────────────────── 공통(KST) 포맷 도우미 ───────────────────────── */
 function nowKST() {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
@@ -104,23 +91,6 @@ function buildLabels(start, end, bucket) {
     }
   }
   return labels;
-}
-
-/* ───────────────────────── userAdNo 숫자 추출기 ───────────────────────── */
-function extractSeqNumber(value) {
-  if (value === undefined || value === null) return null;
-  const str = String(value).trim();
-  if (!str) return null;
-  if (str.toLowerCase() === "nan") return null;
-
-  const match = str.match(/(\d+)(?!.*\d)/);
-  if (match) {
-    const parsed = Number(match[1]);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-
-  const direct = Number(str);
-  return Number.isNaN(direct) ? null : direct;
 }
 
 /* ───────────────────────── SQL 버킷식(KST: UTC→+09) ─────────────────────────
@@ -336,37 +306,6 @@ export async function getAdDetail(req, res, next) {
     if (!row) return res.status(404).json({ message: "Not found" });
     return res.json(row);
   } catch (err) { next(err); }
-}
-
-function parseSeqFromValue(value) {
-  if (value === undefined || value === null) return null;
-  const str = String(value).trim();
-  if (!str) return null;
-
-  const match = str.match(/(\d+)(?!.*\d)/);
-  if (match) {
-    const parsed = Number(match[1]);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-
-  const direct = Number(str);
-  if (!Number.isNaN(direct)) return direct;
-  return null;
-}
-
-function nextUserAdSeq(rows = []) {
-  let maxSeq = 0;
-  for (const row of rows) {
-    const candidates = [row?.userAdNo, row?.adCode, row?.adSeq];
-    for (const candidate of candidates) {
-      const parsed = parseSeqFromValue(candidate);
-      if (parsed !== null) {
-        if (parsed > maxSeq) maxSeq = parsed;
-        break;
-      }
-    }
-  }
-  return Math.max(1, maxSeq + 1);
 }
 
 /* ───────────────────────── 광고 생성 ───────────────────────── */
