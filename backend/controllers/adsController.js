@@ -1,6 +1,19 @@
 // backend/src/controllers/adsController.js
 import { pool } from "../config/db.js";
 
+async function tableHasColumn(conn, tableName, columnName) {
+  const [[row]] = await conn.query(
+    `SELECT 1 AS found
+       FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND column_name = ?
+      LIMIT 1`,
+    [tableName, columnName]
+  );
+  return Boolean(row?.found);
+}
+
 /* ───────────────────────── 공통(KST) 포맷 도우미 ───────────────────────── */
 function nowKST() {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
@@ -93,6 +106,23 @@ function buildLabels(start, end, bucket) {
   return labels;
 }
 
+/* ───────────────────────── userAdNo 숫자 추출기 ───────────────────────── */
+function extractSeqNumber(value) {
+  if (value === undefined || value === null) return null;
+  const str = String(value).trim();
+  if (!str) return null;
+  if (str.toLowerCase() === "nan") return null;
+
+  const match = str.match(/(\d+)(?!.*\d)/);
+  if (match) {
+    const parsed = Number(match[1]);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+
+  const direct = Number(str);
+  return Number.isNaN(direct) ? null : direct;
+}
+
 /* ───────────────────────── SQL 버킷식(KST: UTC→+09) ─────────────────────────
    ※ DB의 createdAt이 이미 KST라면 CONVERT_TZ를 제거하거나 '+09:00'→'+00:00'을
    적절히 조정하세요.
@@ -126,6 +156,61 @@ export async function listMyAds(req, res, next) {
       [userNo]
     );
     return res.json(rows);
+  } catch (err) { next(err); }
+}
+
+/* ───────────────────────── 광고 로그 조회 ───────────────────────── */
+export async function listAdLogs(req, res, next) {
+  try {
+    const userNo = req.user?.userNo ?? req.user?.id;
+    if (!userNo) return res.status(401).json({ message: "Unauthorized" });
+
+    const rawUserAdNo = String(req.query.userAdNo || "").trim();
+    if (!rawUserAdNo) {
+      return res.status(400).json({ message: "userAdNo is required" });
+    }
+
+    const [[ad]] = await pool.query(
+      `SELECT userAdNo
+         FROM ADS
+        WHERE userNo = ? AND userAdNo = ?
+        LIMIT 1`,
+      [userNo, rawUserAdNo]
+    );
+    if (!ad) return res.status(404).json({ message: "Ad not found" });
+
+    const limitRaw = Number(req.query.limit || 200);
+    const offsetRaw = Number(req.query.offset || 0);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.floor(limitRaw), 1), 500) : 200;
+    const offset = Number.isFinite(offsetRaw) ? Math.max(Math.floor(offsetRaw), 0) : 0;
+
+    const [rows] = await pool.query(
+      `SELECT logKey, userAdNo, rawIp, createdAt
+         FROM AD_LOGS
+        WHERE userAdNo = ?
+        ORDER BY createdAt DESC
+        LIMIT ? OFFSET ?`,
+      [rawUserAdNo, limit, offset]
+    );
+
+    const [[countRow]] = await pool.query(
+      `SELECT COUNT(*) AS total
+         FROM AD_LOGS
+        WHERE userAdNo = ?`,
+      [rawUserAdNo]
+    );
+
+    const total = Number(countRow?.total ?? 0);
+    return res.json({
+      userAdNo: rawUserAdNo,
+      logs: rows,
+      meta: {
+        limit,
+        offset,
+        total,
+        hasMore: offset + rows.length < total,
+      },
+    });
   } catch (err) { next(err); }
 }
 
@@ -244,7 +329,7 @@ export async function getAdDetail(req, res, next) {
     const [[row]] = await pool.query(
       `SELECT adSeq, userAdNo, adName, adDomain, adCode
          FROM ADS
-        WHERE userNo = ? ${bySeq ? "adSeq = ?" : "userAdNo = ?"}
+        WHERE userNo = ? AND ${bySeq ? "adSeq = ?" : "userAdNo = ?"}
         LIMIT 1`,
       params
     );
@@ -253,42 +338,123 @@ export async function getAdDetail(req, res, next) {
   } catch (err) { next(err); }
 }
 
+function parseSeqFromValue(value) {
+  if (value === undefined || value === null) return null;
+  const str = String(value).trim();
+  if (!str) return null;
+
+  const match = str.match(/(\d+)(?!.*\d)/);
+  if (match) {
+    const parsed = Number(match[1]);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+
+  const direct = Number(str);
+  if (!Number.isNaN(direct)) return direct;
+  return null;
+}
+
+function nextUserAdSeq(rows = []) {
+  let maxSeq = 0;
+  for (const row of rows) {
+    const candidates = [row?.userAdNo, row?.adCode, row?.adSeq];
+    for (const candidate of candidates) {
+      const parsed = parseSeqFromValue(candidate);
+      if (parsed !== null) {
+        if (parsed > maxSeq) maxSeq = parsed;
+        break;
+      }
+    }
+  }
+  return Math.max(1, maxSeq + 1);
+}
+
 /* ───────────────────────── 광고 생성 ───────────────────────── */
 export async function createAd(req, res, next) {
   try {
     const userNo = req.user?.userNo ?? req.user?.id;
     if (!userNo) return res.status(401).json({ message: "Unauthorized" });
-    const { adName = "", adDomain = "" } = req.body || {};
-    
-    const nameValue = String(adName ?? "").trim();
+
+    const { adName = "", adDomain = "", adCode = "" } = req.body || {};
+    const nameValue   = String(adName ?? "").trim();
     const domainValue = String(adDomain ?? "").trim();
+    const codeValue   = String(adCode ?? "").trim(); // ADS.adCode NOT NULL 대응
 
     const conn = await pool.getConnection();
+    const lockName = `ads_user_${userNo}`;
+
     try {
       await conn.beginTransaction();
-      const [[seqRow]] = await conn.query(
-        `SELECT IFNULL(MAX(userAdSeq), 0) + 1 AS nextSeq FROM ADS WHERE userNo = ?`,
+
+      // 동시성 방지: 사용자 단위 어드바이저리 락
+      const [[lockRow]] = await conn.query("SELECT GET_LOCK(?, 5) AS ok", [lockName]);
+      if (Number(lockRow?.ok) !== 1) {
+        throw Object.assign(new Error("Cannot acquire user lock"), { status: 503 });
+      }
+
+      // (핵심) 해당 사용자 광고를 adSeq 오름차순으로 잠그고 읽음
+      const [seqRows] = await conn.query(
+        `SELECT adSeq
+           FROM ADS
+          WHERE userNo = ?
+          ORDER BY adSeq ASC
+          FOR UPDATE`,
         [userNo]
       );
-      const userAdSeq = Math.max(1, Number(seqRow?.nextSeq ?? 1));
-      const userAdNo = `${userNo}_${userAdSeq}`;
-      const [result] = await conn.query(
-        `INSERT INTO ADS (userNo, userAdNo, userAdSeq, adName, adDomain, createdAt)
-         VALUES (?, ?, ?, ?, ?, NOW())`,
-        [userNo, userAdNo, userAdSeq, nameValue, domainValue]
-      );
-      const adSeq = Number(result.insertId);
 
-      const [[created]] = await conn.query(
-        `SELECT adSeq, userAdNo, adName, adDomain, adCode
-           FROM ADS
-          WHERE userNo = ? AND adSeq = ?
-          LIMIT 1`,
-        [userNo, adSeq]
-      );
+      // 1부터 순차로 스캔하며 첫 번째 빈 번호 찾기
+      let adSeq = 1;
+      for (const r of seqRows) {
+        const v = Number(r.adSeq);
+        if (v < adSeq) continue;     // 중복/이상치 방어
+        if (v === adSeq) adSeq++;    // 기대값과 같으면 다음 번호로
+        else break;                  // (v > adSeq)면 adSeq가 첫 빈 번호
+      }
+
+      let userAdNo = `${userNo}_${adSeq}`;
+
+      // 유니크 충돌(아주 드물게 발생 가능) 대비해 최대 5회 재시도
+      let createdRow = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          await conn.query(
+            `INSERT INTO ADS (userAdNo, userNo, adSeq, adName, adDomain, adCode, createdAt)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+            [userAdNo, userNo, adSeq, nameValue, domainValue, codeValue]
+          );
+
+          const [[created]] = await conn.query(
+            `SELECT adSeq, userAdNo, adName, adDomain, adCode
+               FROM ADS
+              WHERE userNo = ? AND adSeq = ?
+              LIMIT 1`,
+            [userNo, adSeq]
+          );
+          createdRow = created ?? {
+            adSeq,
+            userAdNo,
+            adName: nameValue,
+            adDomain: domainValue,
+            adCode: codeValue,
+          };
+          break;
+        } catch (e) {
+          if (e?.code === "ER_DUP_ENTRY") {
+            // 혹시라도 충돌나면 다음 번호로 밀고 재시도
+            adSeq += 1;
+            userAdNo = `${userNo}_${adSeq}`;
+            continue;
+          }
+          throw e;
+        }
+      }
+
+      if (!createdRow) {
+        throw Object.assign(new Error("Failed to allocate adSeq"), { status: 409 });
+      }
+
       await conn.commit();
-      if (created) return res.status(201).json(created);
-      return res.status(201).json({ adSeq, userAdNo, adName: nameValue, adDomain: domainValue, adCode: null });
+      return res.status(201).json(createdRow);
     } catch (e) {
       await conn.rollback();
       if (e?.code === "ER_DUP_ENTRY") {
@@ -296,9 +462,12 @@ export async function createAd(req, res, next) {
       }
       return next(e);
     } finally {
+      try { await conn.query("SELECT RELEASE_LOCK(?)", [lockName]); } catch {}
       conn.release();
     }
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 }
 
 /* ───────────────────────── 광고 수정 ───────────────────────── */

@@ -11,4 +11,9 @@ export function setToken(token) {
   else delete api.defaults.headers.common.Authorization;
 }
 
+if (typeof window !== "undefined") {
+  const storedToken = window.localStorage.getItem("token");
+  if (storedToken) setToken(storedToken);
+}
+
 export default api;
