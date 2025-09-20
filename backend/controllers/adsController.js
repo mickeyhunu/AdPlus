@@ -96,9 +96,12 @@ function buildLabels(start, end, bucket) {
 /* ───────────────────────── SQL 버킷식(KST: UTC→+09) ─────────────────────────
    ※ DB의 createdAt이 이미 KST라면 CONVERT_TZ를 제거하거나 '+09:00'→'+00:00'을
    적절히 조정하세요.
+   const base = `CONVERT_TZ(l.createdAt, '+00:00', '+09:00')`;
 -------------------------------------------------------------------------- */
+
+/* ───────────────────────── SQL 버킷식(KST 그대로 사용) ───────────────────────── */
 function sqlBucketExpr(bucket) {
-  const base = `CONVERT_TZ(l.createdAt, '+00:00', '+09:00')`;
+  const base = "l.createdAt";
   switch (bucket) {
     case "1m":  return `DATE_FORMAT(${base}, '%Y-%m-%d %H:%i')`;
     case "5m":  return `DATE_FORMAT(DATE_SUB(${base}, INTERVAL MOD(MINUTE(${base}),5)  MINUTE), '%Y-%m-%d %H:%i')`;
