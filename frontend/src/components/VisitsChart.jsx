@@ -1,5 +1,5 @@
 // src/components/VisitsChart.jsx
-import React, { useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -37,9 +37,16 @@ function formatTickLabel(label) {
 }
 
 export default function VisitsChart({ labels = [], series = [] }) {
+  const chartRef = useRef(null);
+  const [xRange, setXRange] = useState(null);
+
+  useEffect(() => {
+    setXRange(null);
+  }, [labels]);
+
   const datasets = useMemo(() => {
     return (series || []).map((s, i) => {
-      const label =         
+      const label =
         s.name
         ?? s.adName
         ?? (s.adSeq !== undefined && s.adSeq !== null ? String(s.adSeq) : undefined)
@@ -48,8 +55,19 @@ export default function VisitsChart({ labels = [], series = [] }) {
         ?? s.id
         ?? `AD ${i + 1}`;
       
-      // ✅ 항상 팔레트에서 색을 가져옴(백엔드 s.color 무시)
+      // ✅ 가능하면 지정된 색상 사용, 없으면 팔레트에서 가져옴
       const pal = PALETTE[i % PALETTE.length];
+      const borderColor = s.color || pal.border;
+      let backgroundColor = pal.bg;
+      if (s.color && typeof s.color === "string") {
+        if (s.color.startsWith("hsl")) {
+          backgroundColor = s.color.replace(")", " / 0.18)");
+        } else if (s.color.startsWith("#") && s.color.length === 7) {
+          backgroundColor = `${s.color}2d`;
+        } else {
+          backgroundColor = s.color;
+        }
+      }
 
       return {
         id: String(
@@ -124,14 +142,108 @@ export default function VisitsChart({ labels = [], series = [] }) {
             return formatTickLabel(raw);
           },
           padding: 8,
+
+          min: xRange?.min,
+          max: xRange?.max,
         },
       },
     },
   };
 
+  const handleWheel = useCallback((event) => {
+    const chart = chartRef.current;
+    if (!chart || !chart.chartArea) return;
+    const total = Array.isArray(labels) ? labels.length : 0;
+    if (total <= 1) return;
+
+    const native = event.nativeEvent ?? event;
+    const deltaY = native?.deltaY;
+    if (!deltaY) return;
+
+    event.preventDefault();
+
+    const currentRange = xRange ?? { min: 0, max: total - 1 };
+    let minIndex = Number.isFinite(currentRange.min) ? currentRange.min : 0;
+    let maxIndex = Number.isFinite(currentRange.max) ? currentRange.max : total - 1;
+    minIndex = Math.max(0, Math.floor(minIndex));
+    maxIndex = Math.min(total - 1, Math.ceil(maxIndex));
+    if (maxIndex <= minIndex) {
+      maxIndex = Math.min(total - 1, minIndex + 1);
+    }
+
+    const span = maxIndex - minIndex;
+    const zoomIn = deltaY < 0;
+    if (zoomIn && span <= 1) return;
+    if (!zoomIn && minIndex === 0 && maxIndex === total - 1) return;
+
+    const { left, right } = chart.chartArea;
+    const areaWidth = right - left;
+    if (areaWidth <= 0) return;
+
+    const offsetX = native.offsetX ?? 0;
+    const relative = (offsetX - left) / areaWidth;
+    const clampedRelative = Math.min(1, Math.max(0, relative));
+    const pointerIndex = minIndex + clampedRelative * span;
+
+    const zoomStep = Math.max(1, Math.round(span * 0.2));
+    let newSpan = zoomIn ? span - zoomStep : span + zoomStep;
+    if (zoomIn) newSpan = Math.max(1, newSpan);
+    else newSpan = Math.min(total - 1, newSpan);
+
+    if (newSpan === span) {
+      if (zoomIn) {
+        if (span <= 1) return;
+        newSpan = span - 1;
+      } else {
+        if (span >= total - 1) return;
+        newSpan = Math.min(total - 1, span + 1);
+      }
+    }
+
+    const ratio = span > 0 ? (pointerIndex - minIndex) / span : 0.5;
+    const clampedRatio = Math.min(1, Math.max(0, Number.isFinite(ratio) ? ratio : 0.5));
+    let newMin = pointerIndex - newSpan * clampedRatio;
+    let newMax = newMin + newSpan;
+
+    if (newMin < 0) {
+      newMax -= newMin;
+      newMin = 0;
+    }
+    if (newMax > total - 1) {
+      const overflow = newMax - (total - 1);
+      newMin -= overflow;
+      newMax = total - 1;
+    }
+
+    newMin = Math.max(0, Math.round(newMin));
+    newMax = Math.min(total - 1, Math.round(newMax));
+    if (newMax <= newMin) {
+      if (zoomIn) {
+        if (newMin > 0) newMin -= 1;
+        else if (newMax < total - 1) newMax += 1;
+      } else {
+        if (newMax < total - 1) newMax += 1;
+        else if (newMin > 0) newMin -= 1;
+      }
+    }
+
+    newMin = Math.max(0, newMin);
+    newMax = Math.min(total - 1, newMax);
+    if (newMax <= newMin) return;
+
+    if (newMin === 0 && newMax === total - 1) {
+      if (xRange === null) return;
+      setXRange(null);
+      return;
+    }
+
+    if (xRange && newMin === xRange.min && newMax === xRange.max) return;
+    setXRange({ min: newMin, max: newMax });
+  }, [labels, xRange]);
+
   return (
-    <div style={{ height: 360 }}>
-      <Line data={data} options={options} datasetIdKey="id" />
+    <div style={{ height: 360 }} onWheel={handleWheel}>
+      <Line ref={chartRef} data={data} options={options} datasetIdKey="id" />
     </div>
   );
 }

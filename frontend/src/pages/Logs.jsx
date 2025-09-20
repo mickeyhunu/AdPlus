@@ -153,84 +153,90 @@ export default function Logs() {
     return `총 ${totalCount}건 중 최신 ${latestCount}건을 표시합니다.${moreText}`;
   }, [ads.length, adsError, adsLoading, logs.length, logsError, logsLoading, logsMeta.hasMore, logsMeta.total, selected]);
 
+  const infoTone = useMemo(() => {
+    if (adsError || logsError) return 'text-red-600';
+    if (adsLoading || logsLoading) return 'text-slate-500';
+    return 'text-slate-600';
+  }, [adsError, adsLoading, logsError, logsLoading]);
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="bg-white shadow rounded-xl p-6 space-y-6">
+    <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-blue-900">로그 조회</h1>
-          <p className="mt-2 text-sm text-blue-700">
+          <h2 className="text-2xl font-bold">로그 조회</h2>
+          <p className="mt-1 text-sm text-slate-600">
             로그인 아이디별로 광고를 선택하고, 선택한 광고에 대한 접속 로그를 확인합니다.
           </p>
         </div>
+      </div>
 
-        <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr] md:items-end">
-          <div>
-            <label htmlFor="log-ad-select" className="block text-sm font-semibold text-blue-900">
-              광고 선택
-            </label>
-            <select
-              id="log-ad-select"
-              className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-blue-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:bg-gray-100"
-              value={selected}
-              disabled={adsLoading || !ads.length}
-              onChange={(e) => setSelected(e.target.value)}
-            >
-              {ads.map((item, index) => {
-                const userAdNo = item?.userAdNo ?? '';
-                const name = item?.adName ? ` · ${item.adName}` : '';
-                const key = userAdNo || `ad-${item?.adSeq ?? index}`;
-                return (
-                  <option key={key} value={userAdNo} disabled={!userAdNo}>
-                    {userAdNo || '(미지정)'}{name}{!userAdNo ? ' · 로그 조회 불가' : ''}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
+      <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr] md:items-start">
+        <div className="rounded-xl border bg-white p-4 shadow-sm">
+          <label htmlFor="log-ad-select" className="block text-sm font-semibold text-slate-700">
+            광고 선택
+          </label>
+          <select
+            id="log-ad-select"
+            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+            value={selected}
+            disabled={adsLoading || !ads.length}
+            onChange={(e) => setSelected(e.target.value)}
+          >
+            {ads.map((item, index) => {
+              const userAdNo = item?.userAdNo ?? '';
+              const name = item?.adName ? ` - ${item.adName}` : '';
+              const key = userAdNo || `ad-${item?.adSeq ?? index}`;
+              return (
+                <option key={key} value={userAdNo} disabled={!userAdNo}>
+                  {userAdNo || '(미지정)'}{name}{!userAdNo ? ' · 로그 조회 불가' : ''}
+                </option>
+              );
+            })}
+          </select>
+        </div>
 
-          <div className="text-sm text-blue-600 min-h-[1.75rem] flex items-center">
-            {infoMessage}
-          </div>
+        <div className={`rounded-xl border bg-white p-4 shadow-sm text-sm ${infoTone}`}>
+          {infoMessage}
         </div>
       </div>
 
-      <div className="bg-white shadow rounded-xl overflow-hidden">
+      <div className="border rounded-xl bg-white shadow-sm overflow-hidden">
         {selectedAd && (
-          <div className="px-6 py-4 border-b border-blue-100 bg-blue-50/60 text-sm text-blue-800 flex flex-wrap gap-2">
+          <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 text-sm text-slate-600 flex flex-wrap gap-2">          
             <span className="font-semibold">광고번호: {selectedAd.userAdNo || '(미지정)'}</span>
-            {selectedAd.adName && <span>· {selectedAd.adName}</span>}
-            {selectedAd.adDomain && <span>· {selectedAd.adDomain}</span>}
+            {selectedAd.adName && <span className="font-semibold">- {selectedAd.adName}</span>}
+            {selectedAd.adDomain && <span className="font-semibold">- {selectedAd.adDomain}</span>}
           </div>
         )}
 
         {logsLoading ? (
-          <div className="p-6 text-sm text-blue-700">로그를 불러오는 중입니다...</div>
+          <div className="p-6 text-sm text-slate-500">로그를 불러오는 중입니다...</div>
         ) : logsError ? (
           <div className="p-6 text-sm text-red-600">{logsError}</div>
         ) : !selected ? (
-          <div className="p-6 text-sm text-blue-700">광고를 선택하면 로그가 표시됩니다.</div>
+          <div className="p-6 text-sm text-slate-500">광고를 선택하면 로그가 표시됩니다.</div>
         ) : !logs.length ? (
-          <div className="p-6 text-sm text-blue-700">표시할 로그가 없습니다.</div>
+          <div className="p-6 text-sm text-slate-500">표시할 로그가 없습니다.</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-blue-100 text-sm text-left">
+            <table className="min-w-full divide-y divide-slate-200 text-sm text-left">
               <thead className="bg-blue-50">
                 <tr>
-                  <th scope="col" className="px-4 py-3 font-semibold text-blue-900">로그 코드</th>
-                  <th scope="col" className="px-4 py-3 font-semibold text-blue-900">광고번호</th>
-                  <th scope="col" className="px-4 py-3 font-semibold text-blue-900">접속 IP</th>
-                  <th scope="col" className="px-4 py-3 font-semibold text-blue-900">접속 시간</th>
+                  <th scope="col" className="px-4 py-3 font-semibold text-slate-700">로그 코드</th>
+                  {/* <th scope="col" className="px-4 py-3 font-semibold text-slate-700">광고번호</th> */}
+                  <th scope="col" className="px-4 py-3 font-semibold text-slate-700">접속 IP</th>
+                  <th scope="col" className="px-4 py-3 font-semibold text-slate-700">접속 시간</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-blue-50">
+              <tbody className="divide-y divide-slate-100">
                 {logs.map((item) => {
                   const key = item?.logKey || `${item?.userAdNo ?? ''}-${item?.createdAt ?? ''}-${item?.rawIp ?? ''}`;
                   return (
-                    <tr key={key} className="hover:bg-blue-50/50">
-                      <td className="px-4 py-3 font-mono text-blue-900">{item?.logKey || '-'}</td>
-                      <td className="px-4 py-3 text-blue-900">{item?.userAdNo || '-'}</td>
-                      <td className="px-4 py-3 text-blue-800">{item?.rawIp || '-'}</td>
-                      <td className="px-4 py-3 text-blue-800">{formatDateTime(item?.createdAt)}</td>
+                    <tr key={key} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-mono text-slate-700">{item?.logKey || '-'}</td>
+                      {/* <td className="px-4 py-3 text-slate-700">{item?.userAdNo || '-'}</td> */}
+                      <td className="px-4 py-3 text-slate-600">{item?.rawIp || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600">{formatDateTime(item?.createdAt)}</td>
                     </tr>
                   );
                 })}

@@ -21,6 +21,92 @@ function colorFor(key) {
   return `hsl(${h} 70% 45%)`;
 }
 
+function toNumericSeq(value) {
+  if (value === undefined || value === null) return null;
+  const str = String(value).trim();
+  if (!str) return null;
+  if (!/^\d+$/.test(str)) return null;
+  const num = Number(str);
+  return Number.isFinite(num) ? num : null;
+}
+
+function extractSeqNumber(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const candidates = [
+    entry.adSeq,
+    entry.seq,
+    entry.userAdNo,
+    entry.adNo,
+    entry.adId,
+    entry.id,
+    entry.adCode,
+    entry.value,
+  ];
+  for (const raw of candidates) {
+    const num = toNumericSeq(raw);
+    if (num !== null) return num;
+  }
+  return null;
+}
+
+function extractSeqLabel(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  const candidates = [
+    entry.adSeq,
+    entry.seq,
+    entry.userAdNo,
+    entry.adNo,
+    entry.adId,
+    entry.id,
+    entry.adCode,
+    entry.value,
+  ];
+  for (const raw of candidates) {
+    if (raw === undefined || raw === null) continue;
+    const str = String(raw).trim();
+    if (str) return str;
+  }
+  return "";
+}
+
+function extractNameLabel(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  const candidates = [entry.adName, entry.name, entry.label];
+  for (const raw of candidates) {
+    if (typeof raw === "string" && raw.trim()) return raw.trim();
+  }
+  return "";
+}
+
+function formatAdLabel(entry) {
+  const name = extractNameLabel(entry);
+  const seq = extractSeqLabel(entry);
+  if (name && seq && name !== seq) return `${name} (${seq})`;
+  return name || seq || "";
+}
+
+function compareByAdSeq(a, b) {
+  const seqA = extractSeqNumber(a);
+  const seqB = extractSeqNumber(b);
+  if (seqA !== null && seqB !== null && seqA !== seqB) return seqA - seqB;
+  if (seqA !== null && seqB === null) return -1;
+  if (seqA === null && seqB !== null) return 1;
+
+  const labelA = formatAdLabel(a);
+  const labelB = formatAdLabel(b);
+  if (labelA && labelB) {
+    const cmp = labelA.localeCompare(labelB, "ko", { numeric: true, sensitivity: "base" });
+    if (cmp !== 0) return cmp;
+  }
+  if (labelA) return -1;
+  if (labelB) return 1;
+  return 0;
+}
+
+function sortByAdSeqList(list = []) {
+  return [...list].sort(compareByAdSeq);
+}
+
 export default function Dashboard() {
   const [days, setDays] = useState(1);         // 실시간성 위해 기본 1일 권장
   const [bucket, setBucket] = useState("1m");  // 기본 1분
@@ -35,7 +121,7 @@ export default function Dashboard() {
       .then(({ data }) => {
         if (!mounted) return;
         const list = Array.isArray(data) ? data : data.ads || [];
-        setAds(list);
+        setAds(sortByAdSeqList(list));
         setSelectedAd("ALL");
       })
       .catch(() => setAds([]));
@@ -68,7 +154,8 @@ export default function Dashboard() {
     return source.map((s) => {
       const colorKey = s.userAdNo
         ?? (s.adSeq !== undefined && s.adSeq !== null ? `SEQ_${s.adSeq}` : s.adCode ?? s.id ?? "");
-      const nameLabel = s.name
+      const nameLabel = formatAdLabel(s)
+        || s.name
         || s.adName
         || (s.adSeq !== undefined && s.adSeq !== null ? String(s.adSeq) : s.userAdNo);
       return {
@@ -83,28 +170,34 @@ export default function Dashboard() {
   const toggleItems = useMemo(() => {
     const items = [{ value: "ALL", label: "전체(비교)" }];
     if (ads.length > 0) {
-      items.push(...ads.map((a) => {
-        const seqLabel = a?.adSeq !== undefined && a?.adSeq !== null
-          ? String(a.adSeq)
-          : (a?.userAdNo ?? "");
-        const nameLabel = typeof a?.adName === "string" ? a.adName.trim() : "";
-        const suffix = seqLabel || a.userAdNo || "";
-        const label = nameLabel
-          ? (suffix ? `${nameLabel} (${suffix})` : nameLabel)
-          : suffix;
-        return {
-          value: a.userAdNo,
-          label,
-        };
-      }));
+      const sortedAds = sortByAdSeqList(ads);
+      for (const ad of sortedAds) {
+        const rawValue = ad?.userAdNo ?? ad?.adSeq ?? ad?.adNo ?? ad?.id ?? ad?.adCode;
+        if (rawValue === undefined || rawValue === null || rawValue === "") continue;
+        items.push({
+          value: String(rawValue),
+          label: formatAdLabel(ad) || String(rawValue),
+        });
+      }
     } else if (Array.isArray(stats.series)) {
       const seen = new Set();
+      const uniqueSeries = [];
       for (const s of stats.series) {
-        const v = s.userAdNo || s.adNo || s.id;
-        if (!v || seen.has(v)) continue;
-        seen.add(v);
-        const seqLabel = s?.adSeq !== undefined && s?.adSeq !== null ? String(s.adSeq) : String(v);
-        items.push({ value: String(v), label: s.name || s.adName || seqLabel });
+        const key = s?.userAdNo ?? s?.adNo ?? s?.id ?? s?.adSeq;
+        if (key === undefined || key === null || key === "") continue;
+        const keyStr = String(key);
+        if (seen.has(keyStr)) continue;
+        seen.add(keyStr);
+        uniqueSeries.push(s);
+      }
+      const sortedSeries = sortByAdSeqList(uniqueSeries);
+      for (const entry of sortedSeries) {
+        const rawValue = entry?.userAdNo ?? entry?.adNo ?? entry?.id ?? entry?.adSeq;
+        if (rawValue === undefined || rawValue === null || rawValue === "") continue;
+        items.push({
+          value: String(rawValue),
+          label: formatAdLabel(entry) || String(rawValue),
+        });
       }
     }
     return items;
