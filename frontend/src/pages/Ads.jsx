@@ -271,7 +271,7 @@ export default function Ads() {
       </div>
 
       {/* 본문: 좌 리스트 / 우 상세 */}
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="mt-4 rounded-xl border bg-white p-5 shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* 리스트 */}
         <div className="overflow-x-auto border rounded-xl">
           <table className="min-w-full text-sm">

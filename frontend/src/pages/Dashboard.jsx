@@ -277,7 +277,7 @@ export default function Dashboard() {
       </div> */}
 
       {/* 차트 */}
-      <div className="mt-6">
+      <div className="mt-6 rounded-xl border bg-white p-5 shadow-sm">
         {loading ? (
           <p className="text-slate-500">불러오는 중...</p>
         ) : (

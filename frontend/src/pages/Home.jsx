@@ -9,7 +9,6 @@ export default function Home() {
           <li>집계는 대시보드에서 확인하세요.</li>
         </ul>
       </div>
-
       <h2 className="text-xl font-semibold">이용 안내</h2>
       <div className="rounded-xl border bg-white p-5 shadow-sm space-y-2">
         <p>좌측 상단 메뉴로 대시보드/광고 설정/로그 조회로 이동할 수 있어요.</p>

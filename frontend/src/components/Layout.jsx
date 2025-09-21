@@ -18,6 +18,16 @@ export default function Layout({ children, onLogout, token, idleRemaining, onKee
       <div className="flex flex-1">
         <main className="flex-1 p-6 bg-gray-50">{children}</main>
       </div>
+      {/* 카카오톡 버튼 */}
+      <a
+        href="https://open.kakao.com/o/sxZdUbTh"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed bottom-6 right-6 flex items-center gap-3 rounded-full bg-[#381E1F] px-5 py-3 text-white shadow-lg transition hover:bg-[#2b1516]"
+      >
+        <img src="/kakaotalk-icon.svg" alt="카카오톡 문의" className="h-9 w-9" />
+        <span className="text-sm font-medium">카카오톡 문의하기</span>
+      </a>
     </div>
   );
 }
