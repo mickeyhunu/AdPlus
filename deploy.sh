@@ -27,6 +27,7 @@ curl -s -i -H "Host: adplus.store" http://127.0.0.1/api/health || true
 
 echo "DONE"
 
-
+# ssh -i .\adPlusKey.pem ubuntu@13.125.253.91
+# cd ADPLUS
 # chmod +x ~/apps/AdPlus/deploy.sh
 # ~/apps/AdPlus/deploy.sh 
