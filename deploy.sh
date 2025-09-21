@@ -27,7 +27,11 @@ curl -s -i -H "Host: adplus.store" http://127.0.0.1/api/health || true
 
 echo "DONE"
 
-# ssh -i .\adPlusKey.pem ubuntu@13.125.253.91
+# ssh -i .\adPlusKey.pem ubuntu@13.125.253.91 --- cmd에서 우분투 접속
+
+# sudo nano /etc/nginx/sites-available/adplus --- cmd에서 nginx 우회수정
+# sudo nginx -t && sudo systemctl reload nginx --- 적용
+
 # cd ADPLUS
 # chmod +x ~/apps/AdPlus/deploy.sh
 # ~/apps/AdPlus/deploy.sh 

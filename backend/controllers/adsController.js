@@ -221,7 +221,7 @@ export async function getAdsStats(req, res, next) {
     endOfToday.setHours(23, 59, 0, 0);
     const end = floorToBucket(endOfToday, bucket);
 
-    // SQL: KST 변환 후 start~end 사이만 집계
+    // SQL: 저장된 KST createdAt 기준으로 start~end 사이만 집계
     const expr = sqlBucketExpr(bucket);
     const placeholders = target.map(() => "?").join(",");
     const params = [
@@ -237,7 +237,7 @@ export async function getAdsStats(req, res, next) {
       SELECT l.userAdNo, ${expr} AS bucketKey, COUNT(*) AS cnt
         FROM AD_LOGS l
        WHERE l.userAdNo IN (${placeholders})
-         AND CONVERT_TZ(l.createdAt, '+00:00', '+09:00') BETWEEN ? AND ?
+         AND l.createdAt BETWEEN ? AND ?
        GROUP BY l.userAdNo, bucketKey
        ORDER BY bucketKey ASC
     `;

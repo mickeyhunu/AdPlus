@@ -20,7 +20,7 @@ export default function Layout({ children, onLogout, token, idleRemaining, onKee
       </div>
       {/* 카카오톡 버튼 */}
       <a
-        href="https://open.kakao.com/o/sxZdUbTh"
+        href="https://open.kakao.com/o/smSyreTh"
         target="_blank"
         rel="noopener noreferrer"
         className="fixed bottom-6 right-6 flex items-center gap-3 rounded-full bg-[#381E1F] px-5 py-3 text-white shadow-lg transition hover:bg-[#2b1516]"
