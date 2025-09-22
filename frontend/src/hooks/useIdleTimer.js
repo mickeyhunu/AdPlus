@@ -38,22 +38,19 @@ export default function useIdleTimer({
   }, [onTimeout]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      deadlineRef.current = null;
+      timedOutRef.current = false;
+      setRemaining(limitMs);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
 
     // 최초 시작/재시작 시점에 데드라인 설정
     reset();
-
-    // 사용자 활동 시 갱신
-    const bump = () => reset();
-    const events = [
-      "mousemove",
-      "mousedown",
-      "keydown",
-      "touchstart",
-      "scroll",
-      "visibilitychange",
-    ];
-    events.forEach((e) => window.addEventListener(e, bump, { passive: true }));
 
     // 1초마다 남은 시간 갱신 & 만료 체크
     intervalRef.current = setInterval(() => {
@@ -67,7 +64,6 @@ export default function useIdleTimer({
     }, 1000);
 
     return () => {
-      events.forEach((e) => window.removeEventListener(e, bump));
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;

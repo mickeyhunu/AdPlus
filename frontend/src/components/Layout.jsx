@@ -1,8 +1,11 @@
 // src/components/Layout.jsx
 import React, { useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import Header from "./Header";
 
 export default function Layout({ children, onLogout, token, idleRemaining, onKeepAlive, user = null }) {
+  const location = useLocation();
+  
   // ✅ 개발 모드에서만 user 로그
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -10,6 +13,11 @@ export default function Layout({ children, onLogout, token, idleRemaining, onKee
       console.log("[Layout] user prop =", user);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!token) return;
+    onKeepAlive?.();
+  }, [token, onKeepAlive, location.pathname, location.search, location.hash]);
 
   return (
     <div className="flex flex-col h-screen">
