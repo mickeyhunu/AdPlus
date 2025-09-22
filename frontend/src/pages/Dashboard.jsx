@@ -13,7 +13,7 @@ const BUCKETS = [
 ];
 
 // 모든 버킷 공통 폴링 주기
-const POLLING_MS = 1000;
+const POLLING_MS = 10 * 60 * 1000;
 
 // 안정적인 색상 해시
 function colorFor(key) {

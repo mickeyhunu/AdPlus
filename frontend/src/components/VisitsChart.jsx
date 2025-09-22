@@ -27,6 +27,11 @@ const PALETTE = [
   { border: "#000000", bg: "rgba(0, 0, 0, 0.12)" },        // black
 ];
 
+const getButtonClass = (enabled) =>
+  `rounded border px-2 py-1 font-medium transition ${
+    enabled ? "bg-white hover:bg-slate-100" : "cursor-not-allowed bg-slate-100 text-slate-400"
+}`;
+
 function formatTickLabel(label) {
   const s = String(label);
   const m1 = s.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/);
@@ -108,142 +113,284 @@ export default function VisitsChart({ labels = [], series = [] }) {
 
   const suggestedMax = useMemo(() => (yMax <= 10 ? 20 : Math.ceil(yMax * 1.2)), [yMax]);
 
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: false,
-    interaction: { mode: "index", intersect: false },
-    plugins: {
-      legend: {
-        position: "top",
-        labels: { usePointStyle: true },
-      },
-      tooltip: { mode: "index", intersect: false },
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        suggestedMax,
-        ticks: {
-          precision: 0,
-          callback: (v) => (Number.isInteger(v) ? v : ""),
-        },
-      },
-      x: {
-        ticks: {
-          autoSkip: true,
-          maxTicksLimit: 20,
-          minRotation: 0,
-          maxRotation: 0,
-          callback: function (value) {
-            const raw = this.getLabelForValue
-              ? this.getLabelForValue(value)
-              : (Array.isArray(labels) ? labels[value] : String(value));
-            return formatTickLabel(raw);
-          },
-          padding: 8,
-
-          min: xRange?.min,
-          max: xRange?.max,
-        },
-      },
-    },
-  };
-
-  const handleWheel = useCallback((event) => {
-    const chart = chartRef.current;
-    if (!chart || !chart.chartArea) return;
-    const total = Array.isArray(labels) ? labels.length : 0;
-    if (total <= 1) return;
-
-    const native = event.nativeEvent ?? event;
-    const deltaY = native?.deltaY;
-    if (!deltaY) return;
-
-    event.preventDefault();
-
-    const currentRange = xRange ?? { min: 0, max: total - 1 };
-    let minIndex = Number.isFinite(currentRange.min) ? currentRange.min : 0;
-    let maxIndex = Number.isFinite(currentRange.max) ? currentRange.max : total - 1;
-    minIndex = Math.max(0, Math.floor(minIndex));
-    maxIndex = Math.min(total - 1, Math.ceil(maxIndex));
-    if (maxIndex <= minIndex) {
-      maxIndex = Math.min(total - 1, minIndex + 1);
-    }
-
-    const span = maxIndex - minIndex;
-    const zoomIn = deltaY < 0;
-    if (zoomIn && span <= 1) return;
-    if (!zoomIn && minIndex === 0 && maxIndex === total - 1) return;
-
-    const { left, right } = chart.chartArea;
-    const areaWidth = right - left;
-    if (areaWidth <= 0) return;
-
-    const offsetX = native.offsetX ?? 0;
-    const relative = (offsetX - left) / areaWidth;
-    const clampedRelative = Math.min(1, Math.max(0, relative));
-    const pointerIndex = minIndex + clampedRelative * span;
-
-    const zoomStep = Math.max(1, Math.round(span * 0.2));
-    let newSpan = zoomIn ? span - zoomStep : span + zoomStep;
-    if (zoomIn) newSpan = Math.max(1, newSpan);
-    else newSpan = Math.min(total - 1, newSpan);
-
-    if (newSpan === span) {
-      if (zoomIn) {
-        if (span <= 1) return;
-        newSpan = span - 1;
-      } else {
-        if (span >= total - 1) return;
-        newSpan = Math.min(total - 1, span + 1);
-      }
-    }
-
-    const ratio = span > 0 ? (pointerIndex - minIndex) / span : 0.5;
-    const clampedRatio = Math.min(1, Math.max(0, Number.isFinite(ratio) ? ratio : 0.5));
-    let newMin = pointerIndex - newSpan * clampedRatio;
-    let newMax = newMin + newSpan;
-
-    if (newMin < 0) {
-      newMax -= newMin;
-      newMin = 0;
-    }
-    if (newMax > total - 1) {
-      const overflow = newMax - (total - 1);
-      newMin -= overflow;
-      newMax = total - 1;
-    }
-
-    newMin = Math.max(0, Math.round(newMin));
-    newMax = Math.min(total - 1, Math.round(newMax));
-    if (newMax <= newMin) {
-      if (zoomIn) {
-        if (newMin > 0) newMin -= 1;
-        else if (newMax < total - 1) newMax += 1;
-      } else {
-        if (newMax < total - 1) newMax += 1;
-        else if (newMin > 0) newMin -= 1;
-      }
-    }
-
-    newMin = Math.max(0, newMin);
-    newMax = Math.min(total - 1, newMax);
-    if (newMax <= newMin) return;
-
-    if (newMin === 0 && newMax === total - 1) {
-      if (xRange === null) return;
-      setXRange(null);
-      return;
-    }
-
-    if (xRange && newMin === xRange.min && newMax === xRange.max) return;
-    setXRange({ min: newMin, max: newMax });
+  const visibleCount = useMemo(() => {
+    if (!Array.isArray(labels)) return 0;
+    if (!xRange) return labels.length;
+    const min = Number.isFinite(xRange.min) ? xRange.min : 0;
+    const max = Number.isFinite(xRange.max) ? xRange.max : labels.length - 1;
+    return Math.max(0, Math.min(labels.length - 1, max) - Math.max(0, min) + 1);
   }, [labels, xRange]);
 
+  const options = useMemo(() => {
+    const total = Array.isArray(labels) ? labels.length : 0;
+    const maxTicks = Math.max(3, Math.min(20, visibleCount || total));
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          position: "top",
+          labels: { usePointStyle: true },
+        },
+        tooltip: { mode: "index", intersect: false },
+      },
+
+      scales: {
+        y: {
+          beginAtZero: true,
+          suggestedMax,
+          ticks: {
+            precision: 0,
+            callback: (v) => (Number.isInteger(v) ? v : ""),
+          },
+        },
+        x: {
+          min: xRange?.min ?? undefined,
+          max: xRange?.max ?? undefined,
+          ticks: {
+            autoSkip: (visibleCount || total) > maxTicks,
+            maxTicksLimit: maxTicks,
+            minRotation: 0,
+            maxRotation: 0,
+            callback(value) {
+              const raw = this.getLabelForValue
+                ? this.getLabelForValue(value)
+                : (Array.isArray(labels) ? labels[value] : String(value));
+              return formatTickLabel(raw);
+            },
+            padding: 8,
+          },
+        },
+      },
+    };
+  }, [labels, suggestedMax, visibleCount, xRange]);
+
+  const applyZoom = useCallback(
+    (direction, anchorRatio = 0.5) => {
+      const total = Array.isArray(labels) ? labels.length : 0;
+      if (total <= 1) return;
+
+      const current = xRange ?? { min: 0, max: total - 1 };
+      let minIndex = Number.isFinite(current.min) ? current.min : 0;
+      let maxIndex = Number.isFinite(current.max) ? current.max : total - 1;
+      minIndex = Math.max(0, Math.floor(minIndex));
+      maxIndex = Math.min(total - 1, Math.ceil(maxIndex));
+      if (maxIndex <= minIndex) {
+        maxIndex = Math.min(total - 1, minIndex + 1);
+      }
+
+      const span = Math.max(1, maxIndex - minIndex);
+      const zoomStep = Math.max(1, Math.round(span * 0.2));
+      const zoomIn = direction === "in";
+      let newSpan = zoomIn ? span - zoomStep : span + zoomStep;
+      newSpan = zoomIn ? Math.max(1, newSpan) : Math.min(total - 1, newSpan);
+
+      if (!zoomIn && (newSpan >= total - 1 || (minIndex === 0 && maxIndex === total - 1))) {
+        if (xRange !== null) setXRange(null);
+        return;
+      }
+      if (zoomIn && span <= 1) return;
+
+      const ratio = Number.isFinite(anchorRatio) ? Math.min(1, Math.max(0, anchorRatio)) : 0.5;
+      const pointerIndex = minIndex + span * ratio;
+      let newMin = pointerIndex - newSpan * ratio;
+      let newMax = newMin + newSpan;
+
+      if (newMin < 0) {
+        newMax -= newMin;
+        newMin = 0;
+      }
+      if (newMax > total - 1) {
+        const overflow = newMax - (total - 1);
+        newMin -= overflow;
+        newMax = total - 1;
+      }
+
+      newMin = Math.max(0, Math.round(newMin));
+      newMax = Math.min(total - 1, Math.round(newMax));
+      if (newMax <= newMin) {
+        if (zoomIn && newMin > 0) newMin -= 1;
+        else if (!zoomIn && newMax < total - 1) newMax += 1;
+      }
+
+      newMin = Math.max(0, newMin);
+      newMax = Math.min(total - 1, newMax);
+      if (newMax <= newMin) return;
+
+      if (newMin === 0 && newMax === total - 1) {
+        if (xRange !== null) setXRange(null);
+        return;
+      }
+
+      if (xRange && newMin === xRange.min && newMax === xRange.max) return;
+      setXRange({ min: newMin, max: newMax });
+    },
+    [labels, xRange]
+  );
+
+
+  const applyPan = useCallback(
+    (direction, magnitude = 1) => {
+      const total = Array.isArray(labels) ? labels.length : 0;
+      if (total <= 1) return;
+      if (!xRange) return;
+
+      let minIndex = Number.isFinite(xRange.min) ? Math.floor(xRange.min) : 0;
+      let maxIndex = Number.isFinite(xRange.max) ? Math.ceil(xRange.max) : total - 1;
+
+      minIndex = Math.max(0, minIndex);
+      maxIndex = Math.min(total - 1, maxIndex);
+
+      if (maxIndex <= minIndex) {
+        maxIndex = Math.min(total - 1, minIndex + 1);
+      }
+
+      const rangeSize = Math.min(total, Math.max(1, maxIndex - minIndex + 1));
+      if (rangeSize >= total && minIndex === 0 && maxIndex === total - 1) return;
+
+      const baseStep = Math.max(1, Math.round(rangeSize * 0.25));
+      const shift = Math.max(1, Math.round(baseStep * magnitude));
+      const directionSign = direction === "right" ? 1 : -1;
+
+      let newMin = minIndex + directionSign * shift;
+      let newMax = newMin + rangeSize - 1;
+
+      if (newMin < 0) {
+        newMin = 0;
+        newMax = rangeSize - 1;
+      }
+      if (newMax > total - 1) {
+        newMax = total - 1;
+        newMin = Math.max(0, newMax - (rangeSize - 1));
+      }
+
+      newMin = Math.max(0, Math.round(newMin));
+      newMax = Math.min(total - 1, Math.round(newMax));
+      if (newMin === minIndex && newMax === maxIndex) return;
+
+      if (newMin <= 0 && newMax >= total - 1) {
+        setXRange(null);
+        return;
+      }
+
+      setXRange({ min: newMin, max: newMax });
+    },
+    [labels, xRange]
+  );
+
+  const handleWheel = useCallback(
+    (event) => {
+      const chart = chartRef.current;
+      if (!chart || !chart.chartArea) return;
+      const total = Array.isArray(labels) ? labels.length : 0;
+      if (total <= 1) return;
+
+      const native = event.nativeEvent ?? event;
+      const deltaX = native?.deltaX ?? 0;
+      const deltaY = native?.deltaY;
+
+      const preferHorizontal = native.shiftKey || Math.abs(deltaX) > Math.abs(deltaY ?? 0);
+      if (preferHorizontal && deltaX) {
+        if (!xRange) return;
+        event.preventDefault();
+        const magnitude = Math.min(3, Math.max(0.2, Math.abs(deltaX) / 120));
+        applyPan(deltaX > 0 ? "right" : "left", magnitude);
+        return;
+      }
+
+      if (!deltaY) return;
+
+      event.preventDefault();
+
+      const { left, right } = chart.chartArea;
+      const areaWidth = right - left;
+      if (areaWidth <= 0) return;
+
+      let offsetX = native.offsetX;
+      if (!Number.isFinite(offsetX)) {
+        const rect = chart.canvas?.getBoundingClientRect();
+        if (!rect) return;
+        offsetX = native.clientX - rect.left;
+      }
+
+      const relative = (offsetX - left) / areaWidth;
+      const clampedRelative = Math.min(1, Math.max(0, relative));
+      applyZoom(deltaY < 0 ? "in" : "out", clampedRelative);
+    },
+    [labels, applyZoom, applyPan, xRange]
+  );
+
+  const handlePanLeft = useCallback(() => applyPan("left"), [applyPan]);
+  const handlePanRight = useCallback(() => applyPan("right"), [applyPan]);
+  const handleZoomIn = useCallback(() => applyZoom("in"), [applyZoom]);
+  const handleZoomOut = useCallback(() => applyZoom("out"), [applyZoom]);
+  const handleResetZoom = useCallback(() => setXRange(null), []);
+
+  const totalCount = Array.isArray(labels) ? labels.length : 0;
+  const canPanLeft = Boolean(xRange && Number.isFinite(xRange.min) && xRange.min > 0);
+  const canPanRight = Boolean(xRange && Number.isFinite(xRange.max) && xRange.max < totalCount - 1);
+  const canZoomIn = totalCount > 1 && (xRange ? xRange.max - xRange.min > 1 : totalCount > 2);
+  const canZoomOut = totalCount > 1 && xRange !== null;
+  const canReset = xRange !== null;
+
+
+
   return (
-    <div style={{ height: 360 }} onWheel={handleWheel}>
-      <Line ref={chartRef} data={data} options={options} datasetIdKey="id" />
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-slate-500">
+        <span className="hidden whitespace-nowrap sm:inline">
+          마우스 휠로 확대/축소, Shift+휠 또는 트랙패드로 좌우 이동이 가능해요.
+        </span>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handlePanLeft}
+            disabled={!canPanLeft}
+            className={getButtonClass(canPanLeft)}
+          >
+            ◀︎ 왼쪽
+          </button>
+          <button
+            type="button"
+            onClick={handlePanRight}
+            disabled={!canPanRight}
+            className={getButtonClass(canPanRight)}
+          >
+            오른쪽 ▶︎
+          </button>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleZoomIn}
+            disabled={!canZoomIn}
+            className={getButtonClass(canZoomIn)}
+          >
+            확대
+          </button>
+          <button
+            type="button"
+            onClick={handleZoomOut}
+            disabled={!canZoomOut}
+            className={getButtonClass(canZoomOut)}
+          >
+            축소
+          </button>
+          <button
+            type="button"
+            onClick={handleResetZoom}
+            disabled={!canReset}
+            className={getButtonClass(canReset)}
+          >
+            전체보기
+          </button>
+        </div>
+      </div>
+      <div style={{ height: 360 }} onWheel={handleWheel}>
+        <Line ref={chartRef} data={data} options={options} datasetIdKey="id" />
+      </div>
     </div>
   );
 }
