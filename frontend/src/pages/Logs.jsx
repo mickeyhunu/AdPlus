@@ -21,25 +21,31 @@ function sortAds(list) {
   return cloned;
 }
 
+function normalizeDateTimeString(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return '-';
+
+  const isoMatch = trimmed.match(/^([0-9]{4}-[0-9]{2}-[0-9]{2})[T ]([0-9]{2}:[0-9]{2}:[0-9]{2})(?:\.[0-9]+)?(?:Z)?$/);
+  if (isoMatch) {
+    const [, datePart, timePart] = isoMatch;
+    return `${datePart} ${timePart}`;
+  }
+
+  return trimmed;
+}
+
 function formatDateTime(value) {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return typeof value === 'string' ? value : '-';
+  if (value === null || value === undefined) return '-';
+
+  if (typeof value === 'string') {
+    return normalizeDateTimeString(value);
   }
-  try {
-    return date.toLocaleString('ko-KR', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-  } catch (err) {
-    return date.toISOString();
+  
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return normalizeDateTimeString(value.toISOString());
   }
+
+  return normalizeDateTimeString(String(value));
 }
 
 export default function Logs() {
