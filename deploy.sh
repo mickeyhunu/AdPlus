@@ -31,7 +31,9 @@ echo "DONE"
 
 # sudo nano /etc/nginx/sites-available/adplus --- cmd에서 nginx 우회수정
 # sudo nginx -t && sudo systemctl reload nginx --- 적용
+# pm2 restart adplus-api
 
 # cd ADPLUS
+
 # chmod +x ~/apps/AdPlus/deploy.sh
 # ~/apps/AdPlus/deploy.sh 
