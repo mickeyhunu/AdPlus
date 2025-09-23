@@ -44,9 +44,21 @@ function formatTickLabel(label) {
 export default function VisitsChart({ labels = [], series = [] }) {
   const chartRef = useRef(null);
   const [xRange, setXRange] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStateRef = useRef({
+    active: false,
+    startClientX: 0,
+    min: 0,
+    max: 0,
+    span: 0,
+    rangeSize: 0,
+    total: 0,
+  });
 
   useEffect(() => {
     setXRange(null);
+    setIsDragging(false);
+    dragStateRef.current.active = false;
   }, [labels]);
 
   const datasets = useMemo(() => {
@@ -280,6 +292,168 @@ export default function VisitsChart({ labels = [], series = [] }) {
     [labels, xRange]
   );
 
+   const updateDrag = useCallback(
+    (eventLike) => {
+      const state = dragStateRef.current;
+      if (!state.active) return;
+      const chart = chartRef.current;
+      if (!chart || !chart.chartArea) return;
+
+      const native = eventLike?.nativeEvent ?? eventLike;
+      if (!native) return;
+
+      const clientX = native.clientX;
+      if (!Number.isFinite(clientX)) return;
+
+      const { left, right } = chart.chartArea;
+      const areaWidth = right - left;
+      if (!Number.isFinite(areaWidth) || areaWidth <= 0) return;
+
+      if (native.cancelable) native.preventDefault();
+
+      const deltaX = clientX - state.startClientX;
+      const shift = (deltaX / areaWidth) * state.rangeSize;
+
+      const total = state.total;
+      let newMin = state.min - shift;
+      let newMax = state.max - shift;
+      const span = state.span;
+
+      if (newMin < 0) {
+        newMin = 0;
+        newMax = newMin + span;
+      }
+      if (newMax > total - 1) {
+        newMax = total - 1;
+        newMin = newMax - span;
+      }
+
+      if (newMin < 0) {
+        newMin = 0;
+        newMax = Math.min(total - 1, newMin + span);
+      }
+      if (newMax > total - 1) {
+        newMax = total - 1;
+        newMin = Math.max(0, newMax - span);
+      }
+
+      const approxFull = newMin <= 0 && newMax >= total - 1;
+
+      setXRange((prev) => {
+        if (approxFull) {
+          return prev === null ? prev : null;
+        }
+        if (
+          prev &&
+          Math.abs((prev.min ?? 0) - newMin) < 1e-3 &&
+          Math.abs((prev.max ?? 0) - newMax) < 1e-3
+        ) {
+          return prev;
+        }
+        return { min: newMin, max: newMax };
+      });
+    },
+    [setXRange]
+  );
+
+  const endDrag = useCallback(() => {
+    if (!dragStateRef.current.active) {
+      setIsDragging(false);
+      return;
+    }
+    dragStateRef.current.active = false;
+    dragStateRef.current.rangeSize = 0;
+    setIsDragging(false);
+  }, []);
+
+  const handleMouseDown = useCallback(
+    (event) => {
+      const chart = chartRef.current;
+      if (!chart || !chart.chartArea) return;
+
+      const total = Array.isArray(labels) ? labels.length : 0;
+      if (total <= 1) return;
+
+      const native = event.nativeEvent ?? event;
+      if (!native || (native.button ?? 0) !== 0) return;
+
+      const currentRange = xRange ?? { min: 0, max: total - 1 };
+      let minIndex = Number.isFinite(currentRange.min) ? currentRange.min : 0;
+      let maxIndex = Number.isFinite(currentRange.max) ? currentRange.max : total - 1;
+
+      minIndex = Math.max(0, minIndex);
+      maxIndex = Math.min(total - 1, maxIndex);
+      if (maxIndex <= minIndex) {
+        maxIndex = Math.min(total - 1, minIndex + 1);
+      }
+
+      const span = Math.max(1, maxIndex - minIndex);
+      const rangeSize = span;
+
+      dragStateRef.current = {
+        active: true,
+        startClientX: native.clientX ?? 0,
+        min: minIndex,
+        max: maxIndex,
+        span,
+        rangeSize,
+        total,
+      };
+
+      setIsDragging(true);
+      if (native.preventDefault) native.preventDefault();
+    },
+    [labels, xRange]
+  );
+
+  const handleMouseMove = useCallback(
+    (event) => {
+      if (!dragStateRef.current.active) return;
+      updateDrag(event);
+    },
+    [updateDrag]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    endDrag();
+  }, [endDrag]);
+
+  useEffect(() => {
+    if (!isDragging) return;
+    if (typeof window === "undefined") return;
+
+    const handleWindowMove = (event) => {
+      updateDrag(event);
+    };
+    const handleWindowUp = () => {
+      endDrag();
+    };
+
+    window.addEventListener("mousemove", handleWindowMove);
+    window.addEventListener("mouseup", handleWindowUp);
+    window.addEventListener("mouseleave", handleWindowUp);
+    window.addEventListener("blur", handleWindowUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleWindowMove);
+      window.removeEventListener("mouseup", handleWindowUp);
+      window.removeEventListener("mouseleave", handleWindowUp);
+      window.removeEventListener("blur", handleWindowUp);
+    };
+  }, [isDragging, updateDrag, endDrag]);
+
+  useEffect(() => {
+    if (!isDragging) return;
+    if (typeof document === "undefined") return;
+    const body = document.body;
+    if (!body) return;
+    const previous = body.style.userSelect;
+    body.style.userSelect = "none";
+    return () => {
+      body.style.userSelect = previous;
+    };
+  }, [isDragging]);
+
   const handleWheel = useCallback(
     (event) => {
       const chart = chartRef.current;
@@ -334,15 +508,12 @@ export default function VisitsChart({ labels = [], series = [] }) {
   const canZoomIn = totalCount > 1 && (xRange ? xRange.max - xRange.min > 1 : totalCount > 2);
   const canZoomOut = totalCount > 1 && xRange !== null;
   const canReset = xRange !== null;
-
-
+  const canDrag = canPanLeft || canPanRight;
+  const dragCursor = isDragging ? "grabbing" : canDrag ? "grab" : "default";
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-slate-500">
-        <span className="hidden whitespace-nowrap sm:inline">
-          마우스 휠로 확대/축소, Shift+휠 또는 트랙패드로 좌우 이동이 가능해요.
-        </span>
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -388,7 +559,13 @@ export default function VisitsChart({ labels = [], series = [] }) {
           </button>
         </div>
       </div>
-      <div style={{ height: 360 }} onWheel={handleWheel}>
+      <div
+        style={{ height: 360, cursor: dragCursor }}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+      >
         <Line ref={chartRef} data={data} options={options} datasetIdKey="id" />
       </div>
     </div>
