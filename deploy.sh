@@ -30,10 +30,11 @@ echo "DONE"
 # ssh -i .\adPlusKey.pem ubuntu@13.125.253.91 --- cmd에서 우분투 접속
 
 # sudo nano /etc/nginx/sites-available/adplus --- cmd에서 nginx 우회수정
-# sudo nginx -t && sudo systemctl reload nginx --- 적용
-# pm2 restart adplus-api
+
 
 # cd ADPLUS
 
-# chmod +x ~/apps/AdPlus/deploy.sh
-# ~/apps/AdPlus/deploy.sh 
+# chmod +x ~/apps/AdPlus/deploy.sh --- sh준비
+# ~/apps/AdPlus/deploy.sh --- sh실행
+# sudo nginx -t && sudo systemctl reload nginx --- 적용
+# pm2 restart adplus-api --- 재실행

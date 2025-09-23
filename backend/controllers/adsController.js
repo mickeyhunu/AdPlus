@@ -5,15 +5,17 @@ import { pool } from "../config/db.js";
 function nowKST() {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
 }
-function fmt(d, s) { // s:'ymd','ymdhm','ymdh','ym','isoWeek'
+function fmt(d, s) { // s:'ymd','ymdhm','ymdh','ymdhms','ym','isoWeek'
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   const hh = String(d.getHours()).padStart(2, "0");
   const mi = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
   if (s === "ymd")   return `${yyyy}-${mm}-${dd}`;
   if (s === "ymdhm") return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
   if (s === "ymdh")  return `${yyyy}-${mm}-${dd} ${hh}:00`;
+  if (s === "ymdhms") return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
   if (s === "ym")    return `${yyyy}-${mm}`;
   if (s === "isoWeek") {
     const u = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -35,9 +37,45 @@ function floorToBucket(d, bucket) {
     case "10m": x.setSeconds(0, 0); x.setMinutes(Math.floor(x.getMinutes()/10)*10); return x;
     case "30m": x.setSeconds(0, 0); x.setMinutes(Math.floor(x.getMinutes()/30)*30); return x;
     case "1h":  x.setMinutes(0, 0, 0); return x;
+        case "4h": {
+      x.setMinutes(0, 0, 0);
+      const hours = x.getHours();
+      x.setHours(Math.floor(hours / 4) * 4);
+      return x;
+    }
+    case "12h": {
+      x.setMinutes(0, 0, 0);
+      const hours = x.getHours();
+      x.setHours(hours >= 12 ? 12 : 0);
+      return x;
+    }
     case "1d":  x.setHours(0, 0, 0, 0); return x;
     default:    return x;
   }
+}
+
+function nextBucketStart(date, bucket) {
+  const next = new Date(date);
+  switch (bucket) {
+    case "1m":  next.setMinutes(next.getMinutes() + 1); break;
+    case "5m":  next.setMinutes(next.getMinutes() + 5); break;
+    case "10m": next.setMinutes(next.getMinutes() + 10); break;
+    case "30m": next.setMinutes(next.getMinutes() + 30); break;
+    case "1h":  next.setHours(next.getHours() + 1); break;
+    case "4h":  next.setHours(next.getHours() + 4); break;
+    case "12h": next.setHours(next.getHours() + 12); break;
+    case "1d":  next.setDate(next.getDate() + 1); break;
+    case "1w":  next.setDate(next.getDate() + 7); break;
+    case "1mo": next.setMonth(next.getMonth() + 1); break;
+    default:     next.setMinutes(next.getMinutes() + 1); break;
+  }
+  return next;
+}
+
+function inclusiveEndBoundary(end, bucket) {
+  const next = nextBucketStart(end, bucket);
+  next.setMilliseconds(next.getMilliseconds() - 1);
+  return fmt(next, "ymdhms");
 }
 
 /* ───────────────────────── 라벨 생성기(KST) ───────────────────────── */
@@ -70,6 +108,18 @@ function buildLabels(start, end, bucket) {
     case "1h": {
       cur.setMinutes(0, 0, 0);
       while (cur <= end) { labels.push(fmt(cur, "ymdh")); cur.setHours(cur.getHours() + 1); }
+      break;
+    }
+    case "4h": {
+      cur.setMinutes(0, 0, 0);
+      cur.setHours(Math.floor(cur.getHours() / 4) * 4);
+      while (cur <= end) { labels.push(fmt(cur, "ymdh")); cur.setHours(cur.getHours() + 4); }
+      break;
+    }
+    case "12h": {
+      cur.setMinutes(0, 0, 0);
+      cur.setHours(cur.getHours() >= 12 ? 12 : 0);
+      while (cur <= end) { labels.push(fmt(cur, "ymdh")); cur.setHours(cur.getHours() + 12); }
       break;
     }
     case "1d": {
@@ -108,6 +158,8 @@ function sqlBucketExpr(bucket) {
     case "10m": return `DATE_FORMAT(DATE_SUB(${base}, INTERVAL MOD(MINUTE(${base}),10) MINUTE), '%Y-%m-%d %H:%i')`;
     case "30m": return `CONCAT(DATE_FORMAT(${base}, '%Y-%m-%d %H:'), LPAD(FLOOR(MINUTE(${base})/30)*30, 2, '0'))`;
     case "1h":  return `DATE_FORMAT(${base}, '%Y-%m-%d %H:00')`;
+    case "4h":  return `DATE_FORMAT(DATE_ADD(DATE(${base}), INTERVAL FLOOR(HOUR(${base})/4)*4 HOUR), '%Y-%m-%d %H:00')`;
+    case "12h": return `DATE_FORMAT(DATE_ADD(DATE(${base}), INTERVAL FLOOR(HOUR(${base})/12)*12 HOUR), '%Y-%m-%d %H:00')`;
     case "1d":  return `DATE_FORMAT(${base}, '%Y-%m-%d')`;
     case "1w":  return `DATE_FORMAT(${base}, '%x-W%v')`;
     case "1mo":
@@ -226,11 +278,8 @@ export async function getAdsStats(req, res, next) {
     const placeholders = target.map(() => "?").join(",");
     const params = [
       ...target,
-      `${fmt(start, "ymd")} 00:00:00`,
-      // end+1단계 직전까지 포함시키기 위해 끝 경계도 문자열 생성
-      (bucket === "1d") ? `${fmt(end, "ymd")} 23:59:59` :
-      (bucket === "1h") ? `${fmt(end, "ymdh").slice(0, 13)}:59:59` :
-                          `${fmt(end, "ymdhm")}:59`,
+      fmt(start, "ymdhms"),
+      inclusiveEndBoundary(end, bucket),
     ];
 
     const sql = `
@@ -262,13 +311,16 @@ export async function getAdsStats(req, res, next) {
       else if (bucket === "5m") prev.setMinutes(prev.getMinutes() - 5);
       else if (bucket === "10m")prev.setMinutes(prev.getMinutes() - 10);
       else if (bucket === "30m")prev.setMinutes(prev.getMinutes() - 30);
-      else if (bucket === "1h") prev.setHours(prev.getHours() - 1);
-      else if (bucket === "1d") prev.setDate(prev.getDate() - 1);
+      else if (bucket === "1h")  prev.setHours(prev.getHours() - 1);
+      else if (bucket === "4h")  prev.setHours(prev.getHours() - 4);
+      else if (bucket === "12h") prev.setHours(prev.getHours() - 12);
+      else if (bucket === "1d")  prev.setDate(prev.getDate() - 1);
+      else if (bucket === "1w")  prev.setDate(prev.getDate() - 7);
+      else if (bucket === "1mo") prev.setMonth(prev.getMonth() - 1);
 
       const head =
-        bucket === "1d" ? fmt(prev, "ymd") :
-        bucket === "1h" ? fmt(prev, "ymdh") :
-                          fmt(prev, "ymdhm");
+        bucket === "1d"  ? fmt(prev, "ymd") :
+        (bucket === "1h" || bucket === "4h" || bucket === "12h") ? fmt(prev, "ymdh") :
 
       labels.unshift(head);
       for (const k of seriesMap.keys()) seriesMap.get(k).unshift(0);

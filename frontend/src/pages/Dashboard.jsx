@@ -10,6 +10,9 @@ const BUCKETS = [
   { key: "10m", label: "10분" },
   { key: "30m", label: "30분" },
   { key: "1h",  label: "1시간" },
+  { key: "4h",  label: "4시간" },
+  { key: "12h",  label: "12시간" },
+  { key: "1d",  label: "1일" },
 ];
 
 // 모든 버킷 공통 폴링 주기
@@ -84,7 +87,7 @@ function sortByAdSeqList(list = []) {
 
 export default function Dashboard() {
   const [days, setDays] = useState(1);        // 기본 1일
-  const [bucket, setBucket] = useState("1m"); // 기본 1분
+  const [bucket, setBucket] = useState("1h"); // 기본 1분
   const [ads, setAds] = useState([]);
   const [selectedAd, setSelectedAd] = useState("ALL");
   const [stats, setStats] = useState({ labels: [], series: [] });
