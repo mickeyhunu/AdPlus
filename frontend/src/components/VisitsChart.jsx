@@ -11,7 +11,136 @@ import {
   Tooltip,
 } from "chart.js";
 
-ChartJS.register(LineElement, PointElement, LinearScale, CategoryScale, Legend, Tooltip);
+const VALUE_LABEL_PLUGIN = {
+  id: "valueLabel",
+  afterDatasetsDraw(chart, _args, pluginOptions) {
+    const { ctx, chartArea } = chart;
+    const options = {
+      display: true,
+      color: "rgba(15, 23, 42, 0.8)",
+      font: { size: 11, weight: "600" },
+      offset: 8,
+      padding: { x: 6, y: 4 },
+      borderRadius: 6,
+      formatter: (value) => `${value}회`,
+      ...pluginOptions,
+    };
+
+    if (!options.display) return;
+
+    const defaultFont = ChartJS?.defaults?.font ?? {};
+    const fontSize = options.font?.size ?? defaultFont.size ?? 12;
+    const fontFamily = options.font?.family ?? defaultFont.family ?? "sans-serif";
+    const fontStyle = options.font?.style ?? defaultFont.style ?? "normal";
+    const fontWeight = options.font?.weight ?? defaultFont.weight ?? "600";
+    const fontString = [fontStyle, fontWeight, `${fontSize}px`, fontFamily]
+      .filter(Boolean)
+      .join(" ");
+
+    const padding = options.padding;
+    const paddingX =
+      typeof padding === "number" ? padding : padding?.x ?? 6;
+    const paddingY =
+      typeof padding === "number" ? padding : padding?.y ?? 4;
+
+    ctx.save();
+    ctx.font = fontString;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      const meta = chart.getDatasetMeta(datasetIndex);
+      if (!meta || meta.hidden) return;
+
+      meta.data.forEach((element, dataIndex) => {
+        if (!element || element.skip || typeof element.x !== "number" || typeof element.y !== "number") {
+          return;
+        }
+
+        if (element.x < chartArea.left || element.x > chartArea.right) return;
+        if (element.y < chartArea.top || element.y > chartArea.bottom) return;
+
+        const rawValue = Array.isArray(dataset.data)
+          ? dataset.data[dataIndex]
+          : undefined;
+        if (rawValue === null || rawValue === undefined || rawValue === "") {
+          return;
+        }
+        const numericValue =
+          typeof rawValue === "number" ? rawValue : Number(rawValue);
+
+        if (!Number.isFinite(numericValue)) return;
+        if (numericValue === 0) return;
+
+        const label = options.formatter
+          ? options.formatter(numericValue, {
+              chart,
+              dataset,
+              datasetIndex,
+              dataIndex,
+            })
+          : `${numericValue}회`;
+
+        if (label === null || label === undefined || label === "") return;
+
+        const text = String(label);
+        const textWidth = ctx.measureText(text).width;
+        const boxWidth = textWidth + paddingX * 2;
+        const boxHeight = fontSize + paddingY * 2;
+
+        let centerY = element.y - (options.offset ?? 8) - boxHeight / 2;
+        const minCenterY = chartArea.top + boxHeight / 2;
+        if (centerY < minCenterY) centerY = minCenterY;
+
+        const x = element.x;
+        const y = centerY;
+
+        if (options.backgroundColor) {
+          ctx.fillStyle = options.backgroundColor;
+          drawRoundedRect(
+            ctx,
+            x - boxWidth / 2,
+            y - boxHeight / 2,
+            boxWidth,
+            boxHeight,
+            options.borderRadius ?? 6
+          );
+          ctx.fill();
+        }
+
+        ctx.fillStyle = options.color ?? "rgba(15, 23, 42, 0.8)";
+        ctx.fillText(text, x, y);
+      });
+    });
+
+    ctx.restore();
+  },
+};
+
+function drawRoundedRect(ctx, x, y, width, height, radius = 0) {
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+ChartJS.register(
+  LineElement,
+  PointElement,
+  LinearScale,
+  CategoryScale,
+  Legend,
+  Tooltip,
+  VALUE_LABEL_PLUGIN
+);
 
 // 🔴🟡🟢🔵 + 추가 대비 색
 const PALETTE = [
@@ -45,6 +174,7 @@ export default function VisitsChart({ labels = [], series = [] }) {
   const chartRef = useRef(null);
   const [xRange, setXRange] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [showCounts, setShowCounts] = useState(false);
   const dragStateRef = useRef({
     active: false,
     startClientX: 0,
@@ -147,6 +277,7 @@ export default function VisitsChart({ labels = [], series = [] }) {
           labels: { usePointStyle: true },
         },
         tooltip: { mode: "index", intersect: false },
+        valueLabel: { display: showCounts },
       },
 
       scales: {
@@ -177,7 +308,7 @@ export default function VisitsChart({ labels = [], series = [] }) {
         },
       },
     };
-  }, [labels, suggestedMax, visibleCount, xRange]);
+  }, [labels, suggestedMax, visibleCount, xRange, showCounts]);
 
   const applyZoom = useCallback(
     (direction, anchorRatio = 0.5) => {
@@ -501,6 +632,10 @@ export default function VisitsChart({ labels = [], series = [] }) {
   const handleZoomIn = useCallback(() => applyZoom("in"), [applyZoom]);
   const handleZoomOut = useCallback(() => applyZoom("out"), [applyZoom]);
   const handleResetZoom = useCallback(() => setXRange(null), []);
+  const handleToggleCounts = useCallback(
+    () => setShowCounts((prev) => !prev),
+    []
+  );
 
   const totalCount = Array.isArray(labels) ? labels.length : 0;
   const canPanLeft = Boolean(xRange && Number.isFinite(xRange.min) && xRange.min > 0);
@@ -514,6 +649,18 @@ export default function VisitsChart({ labels = [], series = [] }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-slate-500">
+        <button
+          type="button"
+          onClick={handleToggleCounts}
+          className={`rounded border px-2 py-1 font-medium transition ${
+            showCounts
+              ? "border-slate-900 bg-slate-900 text-white hover:bg-slate-800"
+              : "bg-white text-slate-600 hover:bg-slate-100"
+          }`}
+          aria-pressed={showCounts}
+        >
+          횟수 표시 {showCounts ? "ON" : "OFF"}
+        </button>
         <div className="flex items-center gap-1">
           <button
             type="button"
