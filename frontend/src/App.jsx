@@ -8,6 +8,7 @@ import Home from "./pages/Home";
 import Ads from "./pages/Ads";
 import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
+import MyPage from "./pages/MyPage"
 import ProtectedRoute from "./components/ProtectedRoute";
 import { setToken } from "./api";
 import { getMe } from "./api/auth";
@@ -32,6 +33,35 @@ export default function App() {
     return window.localStorage.getItem("token");
   });
   const [user, setUser] = useState(() => readStoredUser());
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const handler = (event) => {
+      let nextUser = event?.detail;
+      if (!nextUser || typeof nextUser !== "object") {
+        try {
+          const raw = window.localStorage.getItem("user");
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object") {
+              nextUser = parsed;
+            }
+          }
+        } catch (err) {
+          if (import.meta.env.DEV) {
+            console.warn("[App] Failed to parse user from storage event", err);
+          }
+        }
+      }
+
+      if (!nextUser || typeof nextUser !== "object") return;
+      setUser(nextUser);
+    };
+
+    window.addEventListener("adplus:user-updated", handler);
+    return () => window.removeEventListener("adplus:user-updated", handler);
+  }, []);
 
   useEffect(() => {
     setToken(token);
@@ -188,6 +218,23 @@ export default function App() {
                 onKeepAlive={keepAlive}
               >
                 <Settings />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/my-page"
+          element={
+            <ProtectedRoute token={token}>
+              <Layout
+                token={token}
+                user={user}
+                onLogout={handleLogout}
+                idleRemaining={idleRemaining}
+                onKeepAlive={keepAlive}
+              >
+                <MyPage user={user} />
               </Layout>
             </ProtectedRoute>
           }

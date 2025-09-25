@@ -64,6 +64,7 @@ export default function Sidebar({ open, onOpen, onClose, triggerRef }) {
           <SidebarLink to="/ads" label="광고 관리" onNavigate={onClose} />
           <SidebarLink to="/logs" label="로그 조회" onNavigate={onClose} />
           <SidebarLink to="/settings" label="설정" onNavigate={onClose} />
+          <SidebarLink to="/my-page" label="마이페이지" onNavigate={onClose} />
         </nav>
 
         <div className="mt-auto p-4 text-xs text-blue-600/70">ADplus</div>

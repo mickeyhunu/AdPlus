@@ -1,5 +1,7 @@
 // backend/src/controllers/adsController.js
 import { pool } from "../config/db.js";
+import { buildIpVariants } from "../utils/ip.js";
+import { fetchUserExcludedIps } from "../services/userService.js";
 
 function toNullableNumber(value) {
   if (value === undefined || value === null) return null;
@@ -263,21 +265,36 @@ export async function listAdLogs(req, res, next) {
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.floor(limitRaw), 1), 500) : 200;
     const offset = Number.isFinite(offsetRaw) ? Math.max(Math.floor(offsetRaw), 0) : 0;
 
-    const [rows] = await pool.query(
+    const excludedIps = await fetchUserExcludedIps(pool, userNo);
+    const ipFilters = Array.from(new Set(excludedIps.flatMap((ip) => buildIpVariants(ip))));
+
+    let logsSql =
       `SELECT logKey, userAdNo, rawIp, createdAt
          FROM AD_LOGS
-        WHERE userAdNo = ?
+        WHERE userAdNo = ?`;
+    const logsParams = [rawUserAdNo];
+    if (ipFilters.length > 0) {
+      logsSql += ` AND rawIp NOT IN (${ipFilters.map(() => "?").join(",")})`;
+      logsParams.push(...ipFilters);
+    }
+    logsSql += `
         ORDER BY createdAt DESC
-        LIMIT ? OFFSET ?`,
-      [rawUserAdNo, limit, offset]
-    );
+        LIMIT ? OFFSET ?`;
+    logsParams.push(limit, offset);
 
-    const [[countRow]] = await pool.query(
+    const [rows] = await pool.query(logsSql, logsParams);
+
+    let countSql =
       `SELECT COUNT(*) AS total
-         FROM AD_LOGS
-        WHERE userAdNo = ?`,
-      [rawUserAdNo]
-    );
+        FROM AD_LOGS
+        WHERE userAdNo = ?`;
+    const countParams = [rawUserAdNo];
+    if (ipFilters.length > 0) {
+      countSql += ` AND rawIp NOT IN (${ipFilters.map(() => "?").join(",")})`;
+      countParams.push(...ipFilters);
+    }
+
+    const [[countRow]] = await pool.query(countSql, countParams);
 
     const total = Number(countRow?.total ?? 0);
     return res.json({
@@ -343,6 +360,7 @@ export async function getAdsStats(req, res, next) {
     const placeholders = target.map(() => "?").join(",");
     const params = [
       ...target,
+      userNo,
       fmt(start, "ymdhms"),
       inclusiveEndBoundary(end, bucket),
     ];
@@ -350,8 +368,14 @@ export async function getAdsStats(req, res, next) {
     const sql = `
       SELECT l.userAdNo, ${expr} AS bucketKey, COUNT(*) AS cnt
         FROM AD_LOGS l
+        JOIN ADS a ON a.userAdNo = l.userAdNo
+        LEFT JOIN USER_EXCLUDED_IPS e
+          ON e.userNo = a.userNo
+         AND (l.rawIp = e.ipAddress OR l.rawIp = CONCAT('::ffff:', e.ipAddress))
        WHERE l.userAdNo IN (${placeholders})
+         AND a.userNo = ?
          AND l.createdAt BETWEEN ? AND ?
+       AND e.excludedIpId IS NULL
        GROUP BY l.userAdNo, bucketKey
        ORDER BY bucketKey ASC
     `;
