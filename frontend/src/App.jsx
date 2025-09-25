@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { useCallback, useEffect, useState } from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Layout from "./components/Layout";
@@ -13,32 +13,51 @@ import { setToken } from "./api";
 import { getMe } from "./api/auth";
 import useIdleTimer from "./hooks/useIdleTimer";
 
+function readStoredUser() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem("user");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (err) {
+    console.warn("[App] Failed to parse stored user", err);
+    return null;
+  }
+}
+
 export default function App() {
-  const [token, setTok] = useState(localStorage.getItem("token"));
-  const [user, setUser] = useState(null);
+  const [token, setTok] = useState(() => {
+    if (typeof window === "undefined") return null;
+    return window.localStorage.getItem("token");
+  });
+  const [user, setUser] = useState(() => readStoredUser());
 
   useEffect(() => {
     setToken(token);
+    const storage = typeof window !== "undefined" ? window.localStorage : null;
     if (!token) {
       setUser(null);
-      localStorage.removeItem("user");
+      storage?.removeItem("user");
       return;
     }
     getMe()
       .then(({ data }) => {
         setUser(data);
-        localStorage.setItem("user", JSON.stringify(data));
+        storage?.setItem("user", JSON.stringify(data));
       })
       .catch(() => {
         setUser(null);
-        localStorage.removeItem("user");
+        storage?.removeItem("user");
     });
   }, [token]);
 
   // 만료 시 처리 콜백을 안정화
   const handleTimeout = useCallback(() => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("token");
+      window.localStorage.removeItem("user");
+    }
     setTok(null);
     setUser(null);
   }, []);
@@ -52,8 +71,10 @@ export default function App() {
   });
 
   const handleLogout = useCallback(() => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("token");
+      window.localStorage.removeItem("user");
+    }
     setTok(null);
     setUser(null);
   }, []);
@@ -91,7 +112,9 @@ export default function App() {
               >
                 <Login
                   onLogin={(t) => {
-                    localStorage.setItem("token", t);
+                    if (typeof window !== "undefined") {
+                      window.localStorage.setItem("token", t);
+                    }
                     setTok(t); // useEffect가 /auth/me로 user 로딩
                   }}
                 />
