@@ -85,7 +85,32 @@ function sortByAdSeqList(list = []) {
   return [...list].sort(compareByAdSeq);
 }
 
-export default function Dashboard() {
+function parseDateValue(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateTime(value) {
+  const date = parseDateValue(value);
+  if (!date) return null;
+  try {
+    return new Intl.DateTimeFormat("ko-KR", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date);
+  } catch (err) {
+    if (typeof date.toLocaleString === "function") {
+      return date.toLocaleString("ko-KR");
+    }
+    return date.toISOString();
+  }
+}
+
+export default function Dashboard({ user }) {
   const [days, setDays] = useState(1);        // 기본 1일
   const [bucket, setBucket] = useState("1h"); // 기본 1분
   const [ads, setAds] = useState([]);
@@ -95,19 +120,50 @@ export default function Dashboard() {
   const [refreshTick, setRefreshTick] = useState(0);
   const activeRequestId = useRef(0);
 
+  const serviceWindow = useMemo(() => {
+    const start = parseDateValue(user?.serviceStartAt);
+    const end = parseDateValue(user?.serviceEndAt);
+    const now = new Date();
+    const computedAvailable = (!start || now >= start) && (!end || now <= end);
+    const available = user?.serviceAvailable ?? computedAvailable;
+    let status = "available";
+    if (!available) {
+      if (start && now < start) status = "scheduled";
+      else if (end && now > end) status = "expired";
+      else status = "unavailable";
+    }
+    return { available, start, end, status };
+  }, [user]);
+
+  const serviceAvailable = serviceWindow.available;
+
+  useEffect(() => {
+    if (serviceAvailable) return;
+    activeRequestId.current += 1;
+    setAds([]);
+    setSelectedAd("ALL");
+    setStats({ labels: [], series: [] });
+    setLoading(false);
+    setRefreshTick(0);
+  }, [serviceAvailable]);
+
   // 내 광고 불러오기
   useEffect(() => {
+    if (!serviceAvailable) return;
     let mounted = true;
     myAds()
       .then(({ data }) => {
         if (!mounted) return;
-        const list = Array.isArray(data) ? data : data.ads || [];
+        const list = Array.isArray(data) ? data : data?.ads || [];
         setAds(sortByAdSeqList(list));
         setSelectedAd("ALL");
       })
-      .catch(() => setAds([]));
+      .catch(() => {
+        if (!mounted) return;
+        setAds([]);
+      });
     return () => { mounted = false; };
-  }, []);
+  }, [serviceAvailable]);
 
   // 버킷에 따른 days 상한
   const effectiveDays = useMemo(() => {
@@ -119,12 +175,18 @@ export default function Dashboard() {
 
   // 컨트롤 변경 시 초기화(로딩표시 + 첫 페치 강제)
   useEffect(() => {
+    if (!serviceAvailable) {
+      setLoading(false);
+      setRefreshTick(0);
+      return;
+    }
     setLoading(true);
     setRefreshTick(0);
-  }, [effectiveDays, bucket, selectedAd]);
+  }, [effectiveDays, bucket, selectedAd, serviceAvailable]);
 
   // 데이터 페치
   useEffect(() => {
+    if (!serviceAvailable) return;
     const requestId = ++activeRequestId.current;
     let cancelled = false;
     const firstLoad = refreshTick === 0;
@@ -146,13 +208,14 @@ export default function Dashboard() {
       });
 
     return () => { cancelled = true; };
-  }, [effectiveDays, bucket, selectedAd, refreshTick]);
+  }, [effectiveDays, bucket, selectedAd, refreshTick, serviceAvailable]);
 
   // 폴링
   useEffect(() => {
+    if (!serviceAvailable) return;
     const timer = setInterval(() => setRefreshTick(prev => prev + 1), POLLING_MS);
     return () => clearInterval(timer);
-  }, [effectiveDays, bucket, selectedAd]); // 컨트롤 바뀌면 타이머 재설정
+  }, [effectiveDays, bucket, selectedAd, serviceAvailable]); // 컨트롤 바뀌면 타이머 재설정
 
   // 차트 시리즈 변환
   const seriesForChart = useMemo(() => {
@@ -187,6 +250,43 @@ export default function Dashboard() {
     () => totalsByLabel.reduce((acc, cur) => acc + cur.total, 0),
     [totalsByLabel]
   );
+
+  if (!serviceAvailable) {
+    const startLabel = formatDateTime(serviceWindow.start);
+    const endLabel = formatDateTime(serviceWindow.end);
+    const hasRange = startLabel || endLabel;
+    let statusMessage = "서비스 이용 가능 기간이 아닙니다.";
+    if (serviceWindow.status === "scheduled") {
+      statusMessage = "서비스 이용 가능 기간이 아직 시작되지 않았습니다.";
+    } else if (serviceWindow.status === "expired") {
+      statusMessage = "서비스 이용 가능 기간이 만료되었습니다.";
+    } else if (serviceWindow.status === "unavailable") {
+      statusMessage = "관리자에게 문의하여 이용 가능 기간을 확인해 주세요.";
+    }
+
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-12">
+        <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-8 text-center shadow-sm space-y-4">
+          <h2 className="text-2xl font-bold text-slate-800">대시보드 이용이 제한되었습니다.</h2>
+          <p className="text-slate-600">{statusMessage}</p>
+          <div className="space-y-1 text-sm text-slate-500">
+            {hasRange ? (
+              <p>
+                이용 가능 기간:
+                {' '}
+                <span className="font-medium text-slate-700">
+                  {startLabel ?? "미지정"} ~ {endLabel ?? "미지정"}
+                </span>
+              </p>
+            ) : (
+              <p>이용 가능 기간 정보가 설정되어 있지 않습니다.</p>
+            )}
+            <p>이용 기간이 연장되어야 한다면 관리자에게 문의해 주세요.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // 광고 선택 목록
   const toggleItems = useMemo(() => {
