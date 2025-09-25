@@ -49,6 +49,12 @@ function resolveOrigin() {
   return window.location.origin || "";
 }
 
+function extractAdsList(data) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === "object" && Array.isArray(data.ads)) return data.ads;
+  return [];
+}
+
 export default function Settings() {
   const [ads, setAds] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -64,7 +70,7 @@ export default function Settings() {
     myAds()
       .then(({ data }) => {
         if (cancelled) return;
-        const list = Array.isArray(data) ? data : [];
+        const list = extractAdsList(data);
         const sorted = [...list].sort((a, b) => {
           const userAdNoDiff = compareUserAdNo(a?.userAdNo, b?.userAdNo);
           if (userAdNoDiff !== 0) {

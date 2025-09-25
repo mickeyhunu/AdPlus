@@ -21,6 +21,12 @@ function sortAds(list) {
   return cloned;
 }
 
+function extractAdsList(data) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object' && Array.isArray(data.ads)) return data.ads;
+  return [];
+}
+
 function normalizeDateTimeString(raw) {
   const trimmed = raw.trim();
   if (!trimmed) return '-';
@@ -67,7 +73,7 @@ export default function Logs() {
       try {
         const { data } = await myAds();
         if (!active) return;
-        const list = Array.isArray(data) ? data : [];
+        const list = extractAdsList(data);
         const ordered = sortAds(list);
         setAds(ordered);
         const firstUsable = ordered.find((item) => item?.userAdNo);

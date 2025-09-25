@@ -111,7 +111,7 @@ export default function App() {
                 idleRemaining={idleRemaining}
                 onKeepAlive={keepAlive}
               >
-                <Dashboard />
+                <Dashboard user={user} />
               </Layout>
             </ProtectedRoute>
           }

@@ -1,6 +1,42 @@
 // backend/src/controllers/adsController.js
 import { pool } from "../config/db.js";
 
+function toNullableNumber(value) {
+  if (value === undefined || value === null) return null;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return num;
+}
+
+function toDateOrNull(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isServiceAvailable(startAt, endAt, reference = new Date()) {
+  const start = toDateOrNull(startAt);
+  const end = toDateOrNull(endAt);
+  if (start && reference < start) return false;
+  if (end && reference > end) return false;
+  return true;
+}
+
+async function fetchUserLimitInfo(executor, userNo) {
+  const target = executor && typeof executor.query === "function" ? executor : pool;
+  const [[row]] = await target.query(
+    `SELECT maxAdCount, serviceStartAt, serviceEndAt
+       FROM USERS
+      WHERE userNo = ?
+      LIMIT 1`,
+    [userNo]
+  );
+  return row || null;
+}
+
 /* ───────────────────────── 공통(KST) 포맷 도우미 ───────────────────────── */
 function nowKST() {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
@@ -173,6 +209,11 @@ export async function listMyAds(req, res, next) {
     const userNo = req.user?.userNo ?? req.user?.id;
     if (!userNo) return res.status(401).json({ message: "Unauthorized" });
 
+    const userLimits = await fetchUserLimitInfo(pool, userNo);
+    if (!userLimits) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
     const [rows] = await pool.query(
       `SELECT adSeq, userAdNo, adName, adDomain, adCode
          FROM ADS
@@ -180,7 +221,20 @@ export async function listMyAds(req, res, next) {
         ORDER BY createdAt DESC`,
       [userNo]
     );
-    return res.json(rows);
+
+    const maxAdCount = toNullableNumber(userLimits.maxAdCount);
+    const totalAds = rows.length;
+    const remainingSlots =
+      maxAdCount === null ? null : Math.max(maxAdCount - totalAds, 0);
+
+    return res.json({
+      ads: rows,
+      meta: {
+        totalAds,
+        maxAdCount,
+        remainingSlots,
+      },
+    });
   } catch (err) { next(err); }
 }
 
@@ -244,6 +298,17 @@ export async function getAdsStats(req, res, next) {
   try {
     const userNo = req.user?.userNo ?? req.user?.id;
     if (!userNo) return res.status(401).json({ message: "Unauthorized" });
+
+    const userLimits = await fetchUserLimitInfo(pool, userNo);
+    if (!userLimits) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (!isServiceAvailable(userLimits.serviceStartAt, userLimits.serviceEndAt)) {
+      return res.status(403).json({
+        message: "서비스 이용 가능 기간이 아닙니다.",
+        code: "SERVICE_PERIOD_UNAVAILABLE",
+      });
+    }
 
     const days   = Math.max(1, Number(req.query.days || 7));
     const bucket = String(req.query.bucket || "1h");          // '1m' | '5m' | '10m' | '30m' | '1h' | ...
@@ -384,6 +449,33 @@ export async function createAd(req, res, next) {
       const [[lockRow]] = await conn.query("SELECT GET_LOCK(?, 5) AS ok", [lockName]);
       if (Number(lockRow?.ok) !== 1) {
         throw Object.assign(new Error("Cannot acquire user lock"), { status: 503 });
+      }
+
+      const userLimits = await fetchUserLimitInfo(conn, userNo);
+      if (!userLimits) {
+        await conn.rollback();
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const maxAdCount = toNullableNumber(userLimits.maxAdCount);
+      if (maxAdCount !== null) {
+        const [[countRow]] = await conn.query(
+          `SELECT COUNT(*) AS total FROM ADS WHERE userNo = ?`,
+          [userNo]
+        );
+        const currentAds = toNullableNumber(countRow?.total) ?? 0;
+        if (currentAds >= maxAdCount) {
+          await conn.rollback();
+          return res.status(403).json({
+            message: `최대 ${maxAdCount}개의 광고만 생성할 수 있습니다.`,
+            code: "MAX_ADS_LIMIT",
+            meta: {
+              maxAdCount,
+              currentAds,
+              remainingSlots: 0,
+            },
+          });
+        }
       }
 
       // (핵심) 해당 사용자 광고를 adSeq 오름차순으로 잠그고 읽음

@@ -94,12 +94,43 @@ function buildAdCode(adDomain, userNo, adSeq) {
   return `${code}_${userNo ?? ''}_${seqPart ?? ''}`;
 }
 
+function toNonNegativeNumber(value) {
+  if (value === undefined || value === null) return null;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return num;
+}
+
 export default function Ads() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState(new Set()); // adSeq Set
   const [current, setCurrent] = useState(null); // 편집 대상(객체)
   const [creating, setCreating] = useState(false);
+  const [limitMeta, setLimitMeta] = useState({ totalAds: 0, maxAdCount: null, remainingSlots: null });
+
+  const totalAdsCount = useMemo(() => {
+    const total = toNonNegativeNumber(limitMeta.totalAds);
+    return total ?? rows.length;
+  }, [limitMeta.totalAds, rows.length]);
+
+  const remainingSlots = useMemo(() => {
+    const max = toNonNegativeNumber(limitMeta.maxAdCount);
+    if (max === null) return null;
+    const explicitRemaining = toNonNegativeNumber(limitMeta.remainingSlots);
+    if (explicitRemaining !== null) return explicitRemaining;
+    return Math.max(max - totalAdsCount, 0);
+  }, [limitMeta.maxAdCount, limitMeta.remainingSlots, totalAdsCount]);
+
+  const maxAdCountValue = useMemo(
+    () => toNonNegativeNumber(limitMeta.maxAdCount),
+    [limitMeta.maxAdCount],
+  );
+
+  const canCreateMore = useMemo(() => {
+    if (remainingSlots === null) return true;
+    return remainingSlots > 0;
+  }, [remainingSlots]);
 
   const load = async () => {
     setLoading(true);
@@ -136,7 +167,21 @@ export default function Ads() {
         if (aNum == null && bNum != null) return 1;
         return String(a.adSeq).localeCompare(String(b.adSeq));
       });
+      const meta = (data && typeof data === 'object' && !Array.isArray(data)) ? data.meta : null;
+      const maxAdCount = toNonNegativeNumber(meta?.maxAdCount);
+      const totalAdsFromMeta = toNonNegativeNumber(meta?.totalAds);
+      const remainingFromMeta = toNonNegativeNumber(meta?.remainingSlots);
+      const totalAdsValue = totalAdsFromMeta ?? normalized.length;
+      const remainingValue = maxAdCount === null
+        ? null
+        : (remainingFromMeta ?? Math.max(maxAdCount - totalAdsValue, 0));
+
       setRows(normalized);
+      setLimitMeta({
+        totalAds: totalAdsValue,
+        maxAdCount,
+        remainingSlots: remainingValue,
+      });
       setSelectedKeys(prev => {
         if (prev.size === 0) return prev;
         const prevKeys = new Set();
@@ -156,10 +201,23 @@ export default function Ads() {
         return normalized.find(r => r.adSeq === prev.adSeq) || null;
       });
       return normalized;
+      } catch (error) {
+      setRows([]);
+      setLimitMeta({ totalAds: 0, maxAdCount: null, remainingSlots: null });
+      setSelectedKeys(new Set());
+      setCurrent(null);
+      if (import.meta?.env?.DEV) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to load ads', error);
+      }
+      return [];
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load().catch(() => {});
+  }, []);
+
 
   // 전체선택
   const selectableKeys = useMemo(
@@ -207,32 +265,51 @@ export default function Ads() {
 
   // 생성
   const createNew = async () => {
+    if (!canCreateMore) {
+      const limitText = limitMeta.maxAdCount != null
+        ? `광고는 최대 ${limitMeta.maxAdCount}개까지 생성할 수 있습니다.`
+        : '현재는 새로운 광고를 생성할 수 없습니다.';
+      alert(limitText);
+      return;
+    }
     if (!newForm.adName?.trim()) { alert('광고명을 입력하세요.'); return; }
-    // 1) 우선 생성 (서버가 adSeq 발급)
-    const { data } = await adCreate({ adName: newForm.adName, adDomain: newForm.adDomain });
-    const createdInfo = deriveSeqFromItem(data || {});
-    const createdKey = createdInfo.key !== undefined && createdInfo.key !== null
-      ? String(createdInfo.key)
-      : '';
-    const createdDisplay = createdInfo.display === '' || createdInfo.display === undefined
-      ? createdKey
-      : createdInfo.display;
-    if (!createdKey) {
-      // 서버가 생성된 광고를 응답하지 않는 경우 목록 재조회로 대체
+    try {
+      // 1) 우선 생성 (서버가 adSeq 발급)
+      const { data } = await adCreate({ adName: newForm.adName, adDomain: newForm.adDomain });
+      const createdInfo = deriveSeqFromItem(data || {});
+      const createdKey = createdInfo.key !== undefined && createdInfo.key !== null
+        ? String(createdInfo.key)
+        : '';
+      const createdDisplay = createdInfo.display === '' || createdInfo.display === undefined
+        ? createdKey
+        : createdInfo.display;
+      if (!createdKey) {
+        await load();
+        setCreating(false);
+        setNewForm({ adName: '', adDomain: '기타' });
+        return;
+      }
+      // 2) adCode 생성 후 즉시 업데이트 (요청한 규칙 적용)
+      const latestUserNo = getUserNo();
+      const seqForCode = createdDisplay ?? createdKey;
+      const code = buildAdCode(newForm.adDomain, latestUserNo, seqForCode);
+      await adUpdate(createdKey, { adCode: code });
+
       await load();
       setCreating(false);
       setNewForm({ adName: '', adDomain: '기타' });
-      return;
+      alert('생성되었습니다.');
+    } catch (err) {
+      const response = err?.response?.data;
+      if (response?.code === 'MAX_ADS_LIMIT') {
+        alert(response?.message || `광고는 최대 ${limitMeta.maxAdCount ?? ''}개까지 생성할 수 있습니다.`);
+        await load();
+        setCreating(false);
+        setNewForm({ adName: '', adDomain: '기타' });
+      } else {
+        alert(response?.message || '광고 생성 중 오류가 발생했습니다. 다시 시도해 주세요.');
+      }
     }
-    // 2) adCode 생성 후 즉시 업데이트 (요청한 규칙 적용)
-    const latestUserNo = getUserNo();
-    const seqForCode = createdDisplay ?? createdKey;
-    const code = buildAdCode(newForm.adDomain, latestUserNo, seqForCode);
-    await adUpdate(createdKey, { adCode: code });
-    const refreshed = await load();
-    
-    setCreating(false);
-    setNewForm({ adName: '', adDomain: '기타' });
   };
 
   // 다중 삭제
@@ -259,7 +336,14 @@ export default function Ads() {
         <h2 className="text-2xl font-bold">광고 관리</h2>
         <div className="flex gap-2">
           <button className="rounded border px-3 py-2 text-sm" onClick={load}>새로고침</button>
-          <button className="rounded bg-slate-800 text-white px-3 py-2 text-sm" onClick={()=>setCreating(true)}>+ 신규 광고</button>
+          <button
+            className="rounded bg-slate-800 text-white px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={()=>setCreating(true)}
+            disabled={!canCreateMore}
+            title={!canCreateMore ? '최대 광고 생성 개수에 도달했습니다.' : undefined}
+          >
+            + 신규 광고
+          </button>
           <button
             className="rounded bg-red-600 text-white px-3 py-2 text-sm disabled:opacity-50"
             disabled={selectedKeys.size===0}
@@ -269,6 +353,17 @@ export default function Ads() {
           </button>
         </div>
       </div>
+
+      {maxAdCountValue !== null && (
+        <div className="mt-2 text-sm text-slate-600 flex flex-col sm:flex-row sm:items-center sm:gap-2">
+          <span>등록된 광고 {totalAdsCount}개 / 최대 {maxAdCountValue}개</span>
+          {remainingSlots !== null && (
+            <span className={remainingSlots > 0 ? 'text-slate-500' : 'text-red-600'}>
+              {remainingSlots > 0 ? `추가 생성 가능 ${remainingSlots}개` : '추가 생성 불가'}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* 본문: 좌 리스트 / 우 상세 */}
       <div className="mt-4 rounded-xl border bg-white p-5 shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -400,6 +495,13 @@ export default function Ads() {
                 생성 후 서버가 부여한 광고번호(adSeq)를 기반으로&nbsp;
                 <code className="font-mono">adCode</code>를 <code className="font-mono">{`{og|os|au}_${'{userNo}'}_${'{adSeq}'}`}</code> 형태로 자동 설정합니다.
               </p>
+              {maxAdCountValue !== null && (
+                <p className="text-xs text-slate-500">
+                  {remainingSlots > 0
+                    ? `현재 추가로 생성 가능한 광고는 ${remainingSlots}개입니다.`
+                    : '현재는 추가로 생성할 수 있는 광고가 없습니다.'}
+                </p>
+              )}
               <div className="flex justify-end gap-2 pt-2">
                 <button className="px-3 py-2 rounded border" onClick={()=>setCreating(false)}>취소</button>
                 <button className="px-3 py-2 rounded bg-blue-600 text-white" onClick={createNew}>생성</button>
