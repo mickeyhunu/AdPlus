@@ -70,9 +70,8 @@ export default function Header({ onLogout, token, user, idleRemaining, onKeepAli
                   >
                     {displayName.slice(0, 1).toUpperCase()}
                   </span>
-                  <strong className="text-sm text-blue-900">{displayName}</strong>
+                  <Link to="/my-page" className="text-sm text-blue-900 hover:text-blue-600 underline-offset-2 hover:underline">{displayName}</Link>
                 </div>
-
                 {idleRemaining != null && (
                   <div className="flex items-center gap-2 text-sm text-blue-800/80">
                     {/* 숫자 폭 고정: 모노스페이스 + 고정폭 */}
