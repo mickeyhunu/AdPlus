@@ -1,6 +1,7 @@
 // src/pages/Ads.jsx
 import { useEffect, useMemo, useState } from 'react';
 import { myAds, adCreate, adUpdate, adBulkDelete } from '../api/ads';
+import { computeServiceWindow, formatDateTime } from '../utils/serviceWindow';
 
 // 도메인/코드 맵
 const DOMAIN_ITEMS = [
@@ -101,13 +102,44 @@ function toNonNegativeNumber(value) {
   return num;
 }
 
-export default function Ads() {
+export default function Ads({ user = null }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState(new Set()); // adSeq Set
   const [current, setCurrent] = useState(null); // 편집 대상(객체)
   const [creating, setCreating] = useState(false);
   const [limitMeta, setLimitMeta] = useState({ totalAds: 0, maxAdCount: null, remainingSlots: null });
+
+  const serviceWindow = useMemo(() => computeServiceWindow(user), [user]);
+  const serviceStartLabel = formatDateTime(serviceWindow.start);
+  const serviceEndLabel = formatDateTime(serviceWindow.end);
+  const displayStartLabel = serviceStartLabel ?? '미지정';
+  const displayEndLabel = serviceEndLabel ?? '미지정';
+  const serviceStatusKey = serviceWindow.status;
+  const statusLabelMap = {
+    available: '이용 가능',
+    scheduled: '시작 예정',
+    expired: '만료됨',
+    unavailable: '확인 필요',
+  };
+  const statusDescriptionMap = {
+    available: '현재 광고 서비스를 이용할 수 있습니다.',
+    scheduled: '서비스 이용 가능 기간이 아직 시작되지 않았습니다.',
+    expired: '서비스 이용 가능 기간이 만료되었습니다.',
+    unavailable: '관리자에게 문의하여 이용 가능 기간을 확인해 주세요.',
+  };
+  const statusBadgeClassMap = {
+    available: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    scheduled: 'bg-amber-100 text-amber-700 border border-amber-200',
+    expired: 'bg-rose-100 text-rose-700 border border-rose-200',
+    unavailable: 'bg-slate-200 text-slate-700 border border-slate-300',
+  };
+  const serviceStatusLabel = statusLabelMap[serviceStatusKey] ?? '확인 필요';
+  const serviceStatusDescription = statusDescriptionMap[serviceStatusKey] ?? statusDescriptionMap.unavailable;
+  const serviceBadgeClass = statusBadgeClassMap[serviceStatusKey] ?? statusBadgeClassMap.unavailable;
+  const hasRangeInfo = Boolean(serviceStartLabel || serviceEndLabel);
+  const fallbackDescription = hasRangeInfo ? '' : ' 이용 가능 기간 정보가 설정되어 있지 않습니다. 관리자에게 문의해 주세요.';
+  const serviceMessage = `${serviceStatusDescription}${fallbackDescription}`.trim();
 
   const totalAdsCount = useMemo(() => {
     const total = toNonNegativeNumber(limitMeta.totalAds);
@@ -352,6 +384,21 @@ export default function Ads() {
             선택 삭제
           </button>
         </div>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${serviceBadgeClass}`}>
+            {serviceStatusLabel}
+          </span>
+          <div className="flex flex-wrap items-center gap-1 text-slate-700">
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">이용 가능 기간</span>
+            <span className="font-medium text-slate-800">{displayStartLabel}</span>
+            <span className="text-slate-400">~</span>
+            <span className="font-medium text-slate-800">{displayEndLabel}</span>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">{serviceMessage}</p>
       </div>
 
       {maxAdCountValue !== null && (

@@ -54,6 +54,7 @@ export default function App() {
 
   // 만료 시 처리 콜백을 안정화
   const handleTimeout = useCallback(() => {
+    alert("세션이 만료되어 로그아웃되었습니다.");
     if (typeof window !== "undefined") {
       window.localStorage.removeItem("token");
       window.localStorage.removeItem("user");
@@ -71,6 +72,7 @@ export default function App() {
   });
 
   const handleLogout = useCallback(() => {
+    alert("로그아웃되었습니다.");
     if (typeof window !== "undefined") {
       window.localStorage.removeItem("token");
       window.localStorage.removeItem("user");
@@ -151,7 +153,7 @@ export default function App() {
                 idleRemaining={idleRemaining}
                 onKeepAlive={keepAlive}
               >
-                <Ads />
+                <Ads user={user} />
               </Layout>
             </ProtectedRoute>
           }

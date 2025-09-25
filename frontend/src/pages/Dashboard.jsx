@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchStats, myAds } from "../api/ads";
 import VisitsChart from "../components/VisitsChart";
+import { computeServiceWindow, formatDateTime } from "../utils/serviceWindow";
 
 // 요청한 버킷만 노출
 const BUCKETS = [
@@ -85,31 +86,6 @@ function sortByAdSeqList(list = []) {
   return [...list].sort(compareByAdSeq);
 }
 
-function parseDateValue(value) {
-  if (!value) return null;
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value;
-  }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function formatDateTime(value) {
-  const date = parseDateValue(value);
-  if (!date) return null;
-  try {
-    return new Intl.DateTimeFormat("ko-KR", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(date);
-  } catch (err) {
-    if (typeof date.toLocaleString === "function") {
-      return date.toLocaleString("ko-KR");
-    }
-    return date.toISOString();
-  }
-}
-
 export default function Dashboard({ user }) {
   const [days, setDays] = useState(1);        // 기본 1일
   const [bucket, setBucket] = useState("1h"); // 기본 1분
@@ -120,20 +96,7 @@ export default function Dashboard({ user }) {
   const [refreshTick, setRefreshTick] = useState(0);
   const activeRequestId = useRef(0);
 
-  const serviceWindow = useMemo(() => {
-    const start = parseDateValue(user?.serviceStartAt);
-    const end = parseDateValue(user?.serviceEndAt);
-    const now = new Date();
-    const computedAvailable = (!start || now >= start) && (!end || now <= end);
-    const available = user?.serviceAvailable ?? computedAvailable;
-    let status = "available";
-    if (!available) {
-      if (start && now < start) status = "scheduled";
-      else if (end && now > end) status = "expired";
-      else status = "unavailable";
-    }
-    return { available, start, end, status };
-  }, [user]);
+  const serviceWindow = useMemo(() => computeServiceWindow(user), [user]);
 
   const serviceAvailable = serviceWindow.available;
 
