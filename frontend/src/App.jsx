@@ -133,7 +133,7 @@ export default function App() {
           path="/login"
           element={
             token ? (
-              <Navigate to="/dashboard" replace />
+              <Navigate to="/" replace />
             ) : (
               <Layout
                 token={token}
