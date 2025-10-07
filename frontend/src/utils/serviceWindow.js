@@ -82,17 +82,21 @@ export function computeServiceWindow(input) {
   const now = new Date();
   const computedAvailable = (!start || now >= start) && (!end || now <= end);
   const explicitAvailable = normalizeAvailability(resolveAvailability(input));
-  let available = explicitAvailable ?? computedAvailable;
 
-  if (!start && !end && explicitAvailable === false) {
-    available = true;
-  }
+  const available =
+    explicitAvailable !== undefined
+      ? explicitAvailable
+      : computedAvailable;
 
   let status = "available";
   if (!available) {
-    if (start && now < start) status = "scheduled";
-    else if (end && now > end) status = "expired";
-    else status = "unavailable";
+    if (start && now < start) {
+      status = "scheduled";
+    } else if (end && now > end) {
+      status = "expired";
+    } else {
+      status = "unavailable";
+    }
   }
 
   return { available, status, start, end };
