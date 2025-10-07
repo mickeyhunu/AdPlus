@@ -54,13 +54,39 @@ function resolveAvailability(input) {
   );
 }
 
+function normalizeAvailability(value) {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return undefined;
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const lower = trimmed.toLowerCase();
+    if (["y", "yes", "true", "1", "available", "ok", "enable", "enabled"].includes(lower)) {
+      return true;
+    }
+    if (["n", "no", "false", "0", "unavailable", "disabled", "disable"].includes(lower)) {
+      return false;
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
 export function computeServiceWindow(input) {
   const start = parseDateValue(resolveStart(input));
   const end = parseDateValue(resolveEnd(input));
   const now = new Date();
   const computedAvailable = (!start || now >= start) && (!end || now <= end);
-  const explicitAvailable = resolveAvailability(input);
-  const available = explicitAvailable ?? computedAvailable;
+  const explicitAvailable = normalizeAvailability(resolveAvailability(input));
+  let available = explicitAvailable ?? computedAvailable;
+
+  if (!start && !end && explicitAvailable === false) {
+    available = true;
+  }
 
   let status = "available";
   if (!available) {
