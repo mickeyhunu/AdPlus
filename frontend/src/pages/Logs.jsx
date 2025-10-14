@@ -40,15 +40,48 @@ function normalizeDateTimeString(raw) {
   return trimmed;
 }
 
+function formatAsKst(date) {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(date);
+    const map = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+    const { year, month, day, hour, minute, second } = map;
+    if (year && month && day && hour && minute && second) {
+      return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+    }
+    return formatter.format(date).replace('T', ' ');
+  } catch (err) {
+    const utcMs = date.getTime() + (date.getTimezoneOffset() * 60 * 1000);
+    const kst = new Date(utcMs + 9 * 60 * 60 * 1000);
+    const yyyy = kst.getFullYear();
+    const mm = String(kst.getMonth() + 1).padStart(2, '0');
+    const dd = String(kst.getDate()).padStart(2, '0');
+    const hh = String(kst.getHours()).padStart(2, '0');
+    const mi = String(kst.getMinutes()).padStart(2, '0');
+    const ss = String(kst.getSeconds()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+  }
+}
+
 function formatDateTime(value) {
   if (value === null || value === undefined) return '-';
 
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isNaN(date?.getTime?.())) {
+    return formatAsKst(date);
+  }
+
   if (typeof value === 'string') {
     return normalizeDateTimeString(value);
-  }
-  
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return normalizeDateTimeString(value.toISOString());
   }
 
   return normalizeDateTimeString(String(value));
