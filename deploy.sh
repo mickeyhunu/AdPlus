@@ -18,7 +18,7 @@ sudo rsync -av --delete dist/ /var/www/adplus-frontend/
 echo ">>> Backend deps & reload"
 cd ../backend
 npm ci || npm install
-pm2 reload adplus-api
+pm2 reload adplus
 pm2 save
 
 echo ">>> Smoke test"
@@ -27,7 +27,7 @@ curl -s -i -H "Host: adplus.store" http://127.0.0.1/api/health || true
 
 echo "DONE"
 
-# ssh -i .\adPlusKey.pem ubuntu@13.125.253.91 --- cmd에서 우분투 접속
+# ssh -i .\adPlusKey.pem ubuntu@54.180.2.23 --- cmd에서 우분투 접속
 
 # sudo nano /etc/nginx/sites-available/adplus --- cmd에서 nginx 우회수정
 
