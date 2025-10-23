@@ -37,4 +37,4 @@ echo "DONE"
 # chmod +x ~/apps/AdPlus/deploy.sh --- sh준비
 # ~/apps/AdPlus/deploy.sh --- sh실행
 # sudo nginx -t && sudo systemctl reload nginx --- 적용
-# pm2 restart adplus-api --- 재실행
+# pm2 restart adplus --- 재실행
